@@ -1,0 +1,45 @@
+import Dexie, { type Table } from 'dexie';
+
+export interface ArmazonLocal {
+    sku_armazon: string;
+    modelo_lente: string;
+    caracteristicas_tecnicas: Record<string, unknown>;
+    certificaciones_multiples: string[];
+    stock_disponible: number;
+    precio_clp: number;
+}
+
+export interface CuotaLocal {
+    numero_cuota: number;
+    monto_cuota: string;
+    mes_ejecucion: string;
+}
+
+export interface PedidoOfflineQueue {
+    id?: number;
+    folio_unico_qr: string;
+    rut_paciente: string;
+    id_receta?: string | null;
+    sku_armazon: string;
+    rut_titular_pago?: string | null;
+    version_seq: number;
+    monto_total: string;
+    cuotas: CuotaLocal[];
+    fecha_creacion: string;
+    sincronizado: boolean;
+}
+
+export class AmaruDatabase extends Dexie {
+    armazones!: Table<ArmazonLocal, string>;
+    cola_pedidos!: Table<PedidoOfflineQueue, number>;
+
+    constructor() {
+        super('AmaruDB');
+        this.version(1).stores({
+            armazones: '&sku_armazon, modelo_lente, precio_clp',
+            cola_pedidos: '++id, &folio_unico_qr, rut_paciente, sincronizado'
+        });
+    }
+}
+
+export const db = new AmaruDatabase();
