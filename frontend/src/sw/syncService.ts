@@ -2,8 +2,20 @@ import { db } from '../db/dexie';
 
 const API_BASE_URL = 'http://localhost:8000/api/v1';
 
-export async function sincronizarColaOffline(): Promise<{ procesados: string[]; conflictos: unknown[] }> {
-    const pendientes = await db.cola_pedidos.filter(p => !p.sincronizado).toArray();
+interface ConflictoItem {
+    folio_unico_qr: string;
+    motivo: string;
+}
+
+interface SyncBatchResponse {
+    procesados: string[];
+    conflictos: ConflictoItem[];
+}
+
+export async function sincronizarColaOffline(): Promise<SyncBatchResponse> {
+    const pendientes = await db.cola_pedidos
+        .filter(p => p.estado === 'en_cola' || p.estado === 'conflicto')
+        .toArray();
 
     if (pendientes.length === 0) {
         return { procesados: [], conflictos: [] };
@@ -22,11 +34,17 @@ export async function sincronizarColaOffline(): Promise<{ procesados: string[]; 
         }))
     };
 
+    const token = localStorage.getItem('amaru_access_token');
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+    };
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+
     const response = await fetch(`${API_BASE_URL}/transacciones/sync-batch/`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
+        headers,
         body: JSON.stringify(payload)
     });
 
@@ -34,12 +52,48 @@ export async function sincronizarColaOffline(): Promise<{ procesados: string[]; 
         throw new Error(`Error HTTP al sincronizar: ${response.status}`);
     }
 
-    const data = await response.json();
-    const procesados: string[] = data.procesados || [];
+    const data: SyncBatchResponse = await response.json();
 
+    // Marcar folios procesados como sincronizados
+    const procesados: string[] = data.procesados || [];
     for (const folio of procesados) {
-        await db.cola_pedidos.where('folio_unico_qr').equals(folio).modify({ sincronizado: true });
+        await db.cola_pedidos
+            .where('folio_unico_qr')
+            .equals(folio)
+            .modify({ sincronizado: true, estado: 'sincronizado', conflicto_msg: null });
+    }
+
+    // Persistir mensajes de conflicto por folio
+    const conflictos: ConflictoItem[] = data.conflictos || [];
+    for (const conflicto of conflictos) {
+        await db.cola_pedidos
+            .where('folio_unico_qr')
+            .equals(conflicto.folio_unico_qr)
+            .modify({
+                sincronizado: false,
+                estado: 'conflicto',
+                conflicto_msg: conflicto.motivo || 'Error desconocido del servidor'
+            });
     }
 
     return data;
+}
+
+export async function limpiarSincronizados(): Promise<number> {
+    const ids = await db.cola_pedidos
+        .where('estado')
+        .equals('sincronizado')
+        .primaryKeys();
+    await db.cola_pedidos.bulkDelete(ids as number[]);
+    return ids.length;
+}
+
+
+export async function limpiarSincronizados(): Promise<number> {
+    const ids = await db.cola_pedidos
+        .where('estado')
+        .equals('sincronizado')
+        .primaryKeys();
+    await db.cola_pedidos.bulkDelete(ids as number[]);
+    return ids.length;
 }

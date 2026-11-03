@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 
 from pathlib import Path
+from datetime import timedelta
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -39,16 +40,18 @@ INSTALLED_APPS = [
     # Third-party apps
     'rest_framework',
     'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
-    # Amaru Apps (Domain-Driven Design)
-    'apps.autenticacion',
-    'apps.clinico',
-    'apps.transacciones',
-    'apps.auditoria',
+    # Amaru Apps (Rutas explícitas a AppConfig)
+    'apps.autenticacion.apps.AutenticacionConfig',
+    'apps.clinico.apps.ClinicoConfig',
+    'apps.transacciones.apps.TransaccionesConfig',
+    'apps.auditoria.apps.AuditoriaConfig',
 ]
 
+
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',
+    'corsheaders.middleware.CorsMiddleware',  
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -128,5 +131,20 @@ REST_FRAMEWORK = {
     ),
 }
 
-# CORS Config para el frontend PWA (Vite)
-CORS_ALLOW_ALL_ORIGINS = True # En producción restringir estrictamente al dominio de la PWA
+
+# Permitir peticiones desde el frontend local de Vite
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+CORS_ALLOW_CREDENTIALS = True
+
+
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(hours=14),       # Jornada completa + desayuno y cena
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),         # Ventana para renovar token semanalmente
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
+    'AUTH_HEADER_TYPES': ('Bearer',),
+}

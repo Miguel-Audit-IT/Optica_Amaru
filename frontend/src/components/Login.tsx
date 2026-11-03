@@ -17,14 +17,47 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
         setLoading(true);
         setError('');
 
+        // Validación si intenta autenticarse por primera vez sin internet
+        if (!navigator.onLine) {
+            setError('El primer inicio de turno requiere conexión para validar credenciales.');
+            setLoading(false);
+            return;
+        }
+
         try {
-            if (rut.trim() && password.trim()) {
-                onLoginSuccess();
-            } else {
-                setError('Por favor ingrese RUT y contraseña');
+            const response = await fetch('http://127.0.0.1:8000/api/token/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    username: rut.trim(),
+                    password: password.trim(),
+                }),
+            });
+
+            if (!response.ok) {
+                if (response.status === 401) {
+                    throw new Error('Credenciales inválidas. Verifique RUT y contraseña.');
+                }
+                throw new Error(`Error en el servidor (${response.status})`);
             }
-        } catch {
-            setError('Credenciales inválidas o falla de conexión');
+
+            const data = await response.json();
+
+            // Almacenamos tokens y timestamp de expiración (14 horas)
+            const now = new Date().getTime();
+            const expirationTime = now + 14 * 60 * 60 * 1000;
+
+            localStorage.setItem('amaru_access_token', data.access);
+            localStorage.setItem('amaru_refresh_token', data.refresh);
+            localStorage.setItem('amaru_session_expires_at', expirationTime.toString());
+            localStorage.setItem('amaru_session_active', 'true');
+
+            onLoginSuccess();
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : 'Error al conectar con el servidor';
+            setError(msg);
         } finally {
             setLoading(false);
         }
@@ -67,7 +100,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                 {/* Panel Izquierdo (Branding) */}
                 <div className="w-full md:w-5/12 bg-gradient-to-br from-white/70 to-white/30 p-10 flex flex-col justify-center items-center border-r border-white/40">
                     <div className="bg-white p-4 rounded-3xl shadow-sm mb-6 transition-transform duration-300 hover:scale-105">
-                        <img src={logoImg} alt="Óptica Amaru" className="h-16 w-auto object-contain" />
+                        <img src={logoImg} alt="Ãptica Amaru" className="h-16 w-auto object-contain" />
                     </div>
                     <h2 className="text-2xl font-bold text-[#0B0F19] tracking-tight mb-2">BIENVENIDO</h2>
                     <p className="text-[#FF5500] font-bold tracking-widest text-xs uppercase mb-6">Portal Industrial</p>
@@ -75,13 +108,13 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                     <div className="w-12 h-1.5 bg-[#FF5500] rounded-full mb-6"></div>
 
                     <p className="text-center text-sm text-slate-700 font-medium px-4">
-                        Gestión certificada de EPP óptico en terreno minero.
+                        GestiÃ³n certificada de EPP Ã³ptico en terreno minero.
                     </p>
                 </div>
 
                 {/* Panel Derecho (Formulario) */}
                 <div className="w-full md:w-7/12 p-10 md:p-14 flex flex-col justify-center relative bg-white/40">
-                    {/* Botón flotante central de la referencia */}
+                    {/* BotÃ³n flotante central de la referencia */}
                     <div className="absolute -left-6 top-1/2 -translate-y-1/2 w-12 h-12 bg-white rounded-full shadow-lg border border-slate-100 items-center justify-center text-[#FF5500] hidden md:flex z-20 hover:scale-110 transition-transform">
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
@@ -89,7 +122,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                     </div>
 
                     <h3 className="text-2xl font-extrabold text-[#0B0F19] mb-8 text-center md:text-left tracking-wide">
-                        INICIAR SESIÓN <span className="text-[#FF5500]">.</span>
+                        INICIAR SESIÃN <span className="text-[#FF5500]">.</span>
                     </h3>
 
                     <form onSubmit={handleSubmit} className="space-y-5">
@@ -124,7 +157,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                                 </div>
                                 <input
                                     type="password"
-                                    placeholder="Contraseña"
+                                    placeholder="ContraseÃ±a"
                                     value={password}
                                     onChange={(e) => setPassword(e.target.value)}
                                     className="w-full pl-12 pr-4 py-3.5 bg-white/70 border border-white/80 rounded-full text-sm text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#FF5500]/50 transition-all shadow-sm"
@@ -138,7 +171,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                                 <input type="checkbox" className="rounded border-slate-300 text-[#FF5500] focus:ring-[#FF5500]" />
                                 Recordar cuenta
                             </label>
-                            <a href="#" className="hover:text-[#FF5500] transition-colors">¿Olvidaste tu contraseña?</a>
+                            <a href="#" className="hover:text-[#FF5500] transition-colors">Â¿Olvidaste tu contraseÃ±a?</a>
                         </div>
 
                         <button

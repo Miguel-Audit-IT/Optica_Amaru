@@ -15,6 +15,8 @@ export interface CuotaLocal {
     mes_ejecucion: string;
 }
 
+export type EstadoPedido = 'en_cola' | 'sincronizado' | 'conflicto';
+
 export interface PedidoOfflineQueue {
     id?: number;
     folio_unico_qr: string;
@@ -27,6 +29,9 @@ export interface PedidoOfflineQueue {
     cuotas: CuotaLocal[];
     fecha_creacion: string;
     sincronizado: boolean;
+    // Nuevos campos para manejo de conflictos
+    estado: EstadoPedido;
+    conflicto_msg?: string | null;
 }
 
 export class AmaruDatabase extends Dexie {
@@ -35,9 +40,24 @@ export class AmaruDatabase extends Dexie {
 
     constructor() {
         super('AmaruDB');
+        // v1: esquema original
         this.version(1).stores({
             armazones: '&sku_armazon, modelo_lente, precio_clp',
             cola_pedidos: '++id, &folio_unico_qr, rut_paciente, sincronizado'
+        });
+        // v2: agrega índice por estado y campo conflicto_msg
+        this.version(2).stores({
+            armazones: '&sku_armazon, modelo_lente, precio_clp',
+            cola_pedidos: '++id, &folio_unico_qr, rut_paciente, sincronizado, estado'
+        }).upgrade(tx => {
+            return tx.table('cola_pedidos').toCollection().modify(pedido => {
+                if (!pedido.estado) {
+                    pedido.estado = pedido.sincronizado ? 'sincronizado' : 'en_cola';
+                }
+                if (pedido.conflicto_msg === undefined) {
+                    pedido.conflicto_msg = null;
+                }
+            });
         });
     }
 }
