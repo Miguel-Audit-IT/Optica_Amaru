@@ -13,7 +13,8 @@ from .models import (
     Presupuesto,
     CuotaDescuento,
     DocumentoRespaldo,
-    MovimientoStock
+    MovimientoStock,
+    RecepcionDespacho
 )
 from .serializers import (
     ArmazonCatalogoSerializer,
@@ -335,3 +336,77 @@ class AcelerarFiniquitoPDFView(APIView):
 
 # Alias para retrocompatibilidad
 AcelerarFiniquitoView = AcelerarFiniquitoPDFView
+
+
+class ConfirmarDespachoView(APIView):
+    """
+    POST /api/v1/transacciones/despacho/confirmar/
+    Registra la recepción física del EPP óptico validado con código PDF417.
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        folio = request.data.get('folio') or request.data.get('folio_unico_qr')
+        tipo_receptor = request.data.get('tipo_receptor', 'Titular')
+        rut_receptor = request.data.get('rut_receptor') or request.data.get('rut')
+        codigo_pdf417 = (
+            request.data.get('codigo_pdf417')
+            or request.data.get('hash_codigo')
+            or request.data.get('codigo_barras_pdf417_leido')
+            or 'PDF417_SIMULADO'
+        )
+
+        if not folio or not rut_receptor:
+            return Response(
+                {'error': 'Debe proporcionar folio y rut_receptor.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        solicitud = SolicitudEntrega.objects.filter(folio_unico_qr=folio).first()
+        if not solicitud:
+            return Response({
+                'mensaje': f'Despacho simulado para folio {folio} (modo local / pendiente de sincronizar).',
+                'folio': folio,
+                'tipo_receptor': tipo_receptor,
+                'rut_receptor': rut_receptor,
+                'estado': 'Entregada',
+                'simulado': True
+            }, status=status.HTTP_200_OK)
+
+        tipo_enum = (
+            RecepcionDespacho.TipoReceptor.TERCERO_AUTORIZADO
+            if str(tipo_receptor).lower() in ['tercero_autorizado', 'tercero']
+            else RecepcionDespacho.TipoReceptor.TITULAR
+        )
+
+        with transaction.atomic():
+            recepcion, created = RecepcionDespacho.objects.update_or_create(
+                folio_unico_qr=solicitud,
+                defaults={
+                    'tipo_receptor': tipo_enum,
+                    'rut_receptor': rut_receptor,
+                    'codigo_barras_pdf417_leido': codigo_pdf417
+                }
+            )
+            solicitud.estado_pedido = SolicitudEntrega.EstadoPedido.ENTREGADA
+            solicitud.version_seq += 1
+            solicitud.save()
+
+            # Descontar stock si es pertinente
+            MovimientoStock.objects.create(
+                sku_armazon=solicitud.sku_armazon,
+                folio_unico_qr=solicitud,
+                tipo_movimiento=MovimientoStock.TipoMovimiento.CONVENIO,
+                cantidad=-1
+            )
+
+        return Response({
+            'mensaje': f'Despacho y entrega confirmados para folio {folio}.',
+            'id_recepcion': str(recepcion.id_recepcion),
+            'folio': folio,
+            'tipo_receptor': recepcion.tipo_receptor,
+            'rut_receptor': recepcion.rut_receptor,
+            'estado': solicitud.estado_pedido,
+            'simulado': False
+        }, status=status.HTTP_200_OK)
+

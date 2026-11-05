@@ -6,6 +6,7 @@ from .views import (
     AcelerarFiniquitoView,
     AcelerarFiniquitoPDFView,
     ComprobanteEntregaPDFView,
+    ConfirmarDespachoView,
 )
 from .dashboard_views import (
     DashboardResumenView,
@@ -22,7 +23,12 @@ urlpatterns = [
 
     # ── Gestión documental y finanzas ─────────────────────────────────────────
     path('pedidos/<str:folio_unico_qr>/comprobante/', SubirComprobanteView.as_view(), name='subir_comprobante'),
+    path('transacciones/pedidos/<str:folio_unico_qr>/comprobante/', SubirComprobanteView.as_view(), name='transacciones_subir_comprobante'),
     path('finanzas/pedidos/<str:folio_qr>/acelerar-finiquito/', AcelerarFiniquitoPDFView.as_view(), name='acelerar_finiquito'),
+    path('despacho/confirmar/', ConfirmarDespachoView.as_view(), name='confirmar_despacho'),
+    path('transacciones/despacho/confirmar/', ConfirmarDespachoView.as_view(), name='confirmar_despacho_alias'),
+    path('transacciones/recepcion-despacho/', ConfirmarDespachoView.as_view(), name='transacciones_recepcion_despacho'),
+    path('recepcion-despacho/', ConfirmarDespachoView.as_view(), name='recepcion_despacho_root'),
 
     # ── Generación de Documentos PDF Oficiales (Semana 3) ──────────────────────
     path('transacciones/pedidos/<str:folio_qr>/comprobante-pdf/', ComprobanteEntregaPDFView.as_view(), name='comprobante_entrega_pdf'),

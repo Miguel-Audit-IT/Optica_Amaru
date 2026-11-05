@@ -1,219 +1,1085 @@
 import React, { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { db, type PedidoOfflineQueue } from '../db/dexie';
+import {
+  ShieldCheck,
+  FilePlus,
+  Glasses,
+  CheckCircle2,
+  RotateCw,
+  Trash2,
+  QrCode,
+  Eye,
+  AlertTriangle,
+  Clock,
+  WifiOff,
+  Database,
+  Building,
+  ArrowRight,
+  ArrowLeft,
+  User,
+  Check,
+  CreditCard,
+  Camera,
+} from 'lucide-react';
+import { db, type PedidoOfflineQueue, type ArmazonLocal } from '../db/dexie';
 import { sincronizarColaOffline, limpiarSincronizados } from '../sw/syncService';
 import { validarRUT, normalizarInputRUT, formatearRUT } from '../utils/rut';
+import { RecetaModal } from '../components/RecetaModal';
+import { CapturaPhygital } from '../components/CapturaPhygital';
+import { ReservaHoraWidget } from '../components/ReservaHoraWidget';
+import { type RecetaOpticaItem } from '../services/clinicoService';
 
 interface TerminalViewProps {
   isOnline: boolean;
   onSessionExpired: () => void;
 }
 
+const EMPRESAS_CONVENIO = [
+  'Minera Centinela',
+  'Minera Escondida',
+  'Codelco Chuquicamata',
+  'Minera Los Pelambres',
+  'Compañía Minera Doña Inés de Collahuasi',
+];
+
 const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired: _onSessionExpired }) => {
+  // ── Control de Pasos del Wizard (1, 2, 3) ───────────────────────────────────
+  const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
+
+  // ── Paso 1: Filiación y Contexto ───────────────────────────────────────────
   const [rutPaciente, setRutPaciente] = useState('');
   const [errorRutPaciente, setErrorRutPaciente] = useState('');
-  const [tieneRecetaVigente, setTieneRecetaVigente] = useState(true);
+  const [nombrePaciente, setNombrePaciente] = useState('');
+  const [tipoUsuario, setTipoUsuario] = useState<'Particular' | 'Convenio'>('Convenio');
+  const [empresaSeleccionada, setEmpresaSeleccionada] = useState(EMPRESAS_CONVENIO[0]);
+  const [autorizacionBiometrica, setAutorizacionBiometrica] = useState(false);
+
+  // ── Paso 2: Validación Clínica y Embudo ─────────────────────────────────────
+  // 'vigente' = Poseo receta vigente (< 365 días)
+  // 'vencida' = No poseo receta o requiere actualización (Embudo Activo)
+  const [tipoReceta, setTipoReceta] = useState<'vigente' | 'vencida'>('vigente');
+  const [mostrarModalReceta, setMostrarModalReceta] = useState(false);
+  const [recetaActiva, setRecetaActiva] = useState<RecetaOpticaItem | null>(null);
   const [skuSeleccionado, setSkuSeleccionado] = useState('');
   const [montoTotal, setMontoTotal] = useState('85000');
-  const [esConvenio, setEsConvenio] = useState(true);
+
+  // ── Paso 3: Cotización y Pago ──────────────────────────────────────────────
   const [rutTitular, setRutTitular] = useState('');
   const [errorRutTitular, setErrorRutTitular] = useState('');
+  const [esMismoTitular, setEsMismoTitular] = useState(true);
+  const [numCuotas, setNumCuotas] = useState<number>(2);
+
+  // ── Módulo Phygital: Respaldo de Vale Sindical ─────────────────────────────
+  const [mostrarPhygital, setMostrarPhygital] = useState(false);
+  const [folioPhygital, setFolioPhygital] = useState('');
+
+  // ── Datos Locales y Cola Dexie ──────────────────────────────────────────────
   const [colaPendiente, setColaPendiente] = useState<PedidoOfflineQueue[]>([]);
+  const [armazonesList, setArmazonesList] = useState<ArmazonLocal[]>([]);
   const [mensajeSync, setMensajeSync] = useState('');
+  const [sincronizando, setSincronizando] = useState(false);
 
   useEffect(() => {
     cargarDatosLocales();
   }, []);
 
+  // Mantener sincronizado rutTitular si es el mismo paciente
   useEffect(() => {
-    if (!esConvenio) { setRutTitular(''); setErrorRutTitular(''); }
-  }, [esConvenio]);
+    if (esMismoTitular && rutPaciente) {
+      setRutTitular(rutPaciente);
+      setErrorRutTitular('');
+    }
+  }, [esMismoTitular, rutPaciente]);
 
   const cargarDatosLocales = async () => {
-    const count = await db.armazones.count();
-    if (count === 0) {
-      await db.armazones.bulkAdd([
-        { sku_armazon: 'EPP-MIN-001', modelo_lente: 'Titanium Shield Industrial Pro', caracteristicas_tecnicas: { material: 'Policarbonato Reforzado', filtro_uv: 'UV400' }, certificaciones_multiples: ['ANSI Z87.1', 'EN 166'], stock_disponible: 15, precio_clp: 85000 },
-        { sku_armazon: 'EPP-MIN-002', modelo_lente: 'Vulcan Flex Faena Extreme', caracteristicas_tecnicas: { material: 'TR90 Resistente a Impacto', patillas: 'Ajustables' }, certificaciones_multiples: ['ANSI Z87.1'], stock_disponible: 8, precio_clp: 92000 }
-      ]);
+    try {
+      const count = await db.armazones.count();
+      if (count === 0) {
+        await db.armazones.bulkAdd([
+          {
+            sku_armazon: 'EPP-MIN-001',
+            modelo_lente: 'Titanium Shield Industrial Pro',
+            caracteristicas_tecnicas: { material: 'Policarbonato Reforzado', filtro_uv: 'UV400' },
+            certificaciones_multiples: ['ANSI Z87.1', 'EN 166'],
+            stock_disponible: 15,
+            precio_clp: 85000,
+          },
+          {
+            sku_armazon: 'EPP-MIN-002',
+            modelo_lente: 'Vulcan Flex Faena Extreme',
+            caracteristicas_tecnicas: { material: 'TR90 Resistente a Impacto', patillas: 'Ajustables' },
+            certificaciones_multiples: ['ANSI Z87.1'],
+            stock_disponible: 8,
+            precio_clp: 92000,
+          },
+        ]);
+      }
+      const armazones = await db.armazones.toArray();
+      setArmazonesList(armazones);
+      const cola = await db.cola_pedidos.toArray();
+      setColaPendiente(cola);
+    } catch (err) {
+      console.error('Error al cargar datos locales de Dexie:', err);
     }
-    setColaPendiente(await db.cola_pedidos.toArray());
   };
 
+  // Validaciones RUT Paciente
   const handleRutPacienteChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = normalizarInputRUT(e.target.value);
     setRutPaciente(v);
     if (v.length > 3) setErrorRutPaciente(validarRUT(v) ? '' : 'RUT inválido (Módulo 11)');
     else setErrorRutPaciente('');
   };
+
   const handleRutPacienteBlur = () => {
     if (!rutPaciente) return;
-    const f = formatearRUT(rutPaciente); setRutPaciente(f);
+    const f = formatearRUT(rutPaciente);
+    setRutPaciente(f);
     setErrorRutPaciente(validarRUT(f) ? '' : 'RUT inválido (Módulo 11)');
+    if (esMismoTitular) setRutTitular(f);
   };
+
+  // Validaciones RUT Titular (Paso 3)
   const handleRutTitularChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = normalizarInputRUT(e.target.value);
     setRutTitular(v);
     if (v.length > 3) setErrorRutTitular(validarRUT(v) ? '' : 'RUT inválido (Módulo 11)');
     else setErrorRutTitular('');
   };
+
   const handleRutTitularBlur = () => {
     if (!rutTitular) return;
-    const f = formatearRUT(rutTitular); setRutTitular(f);
+    const f = formatearRUT(rutTitular);
+    setRutTitular(f);
     setErrorRutTitular(validarRUT(f) ? '' : 'RUT inválido (Módulo 11)');
   };
 
-  const formularioEsValido = () =>
-    !!rutPaciente && validarRUT(rutPaciente) && !!skuSeleccionado &&
-    (!esConvenio || (!!rutTitular && validarRUT(rutTitular)));
+  // Validaciones por paso
+  const paso1Valido =
+    !!rutPaciente &&
+    validarRUT(rutPaciente) &&
+    nombrePaciente.trim().length >= 3 &&
+    (tipoUsuario === 'Particular' || !!empresaSeleccionada) &&
+    autorizacionBiometrica;
 
-  const handleRegistrarPedido = async (e: React.FormEvent) => {
+  const paso2Valido =
+    tipoReceta === 'vigente' && !!skuSeleccionado;
+
+  const paso3Valido =
+    !!rutTitular && validarRUT(rutTitular) && numCuotas >= 1 && numCuotas <= 4;
+
+  const handleLimpiarTodo = () => {
+    setRutPaciente('');
+    setNombrePaciente('');
+    setErrorRutPaciente('');
+    setRutTitular('');
+    setErrorRutTitular('');
+    setSkuSeleccionado('');
+    setRecetaActiva(null);
+    setAutorizacionBiometrica(false);
+    setTipoReceta('vigente');
+    setCurrentStep(1);
+    setMensajeSync('Terminal restablecido para una nueva atención.');
+  };
+
+  // Finalizar y Guardar en Dexie (Paso 3)
+  const handleFinalizarPedido = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formularioEsValido()) return;
+    if (!paso3Valido) return;
+
     const nuevoFolio = `FOLIO-${uuidv4().substring(0, 8).toUpperCase()}`;
+    const cuotaMonto = Math.round(Number(montoTotal) / numCuotas).toString();
+
+    // Generar array de cuotas dinámico
+    const cuotasArray = Array.from({ length: numCuotas }, (_, idx) => {
+      const d = new Date();
+      d.setMonth(d.getMonth() + idx + 1);
+      return {
+        numero_cuota: idx + 1,
+        monto_cuota: cuotaMonto,
+        mes_ejecucion: d.toISOString().split('T')[0],
+      };
+    });
+
     await db.cola_pedidos.add({
       folio_unico_qr: nuevoFolio,
       rut_paciente: formatearRUT(rutPaciente),
+      id_receta: recetaActiva?.id_receta || null,
       sku_armazon: skuSeleccionado,
-      rut_titular_pago: esConvenio ? formatearRUT(rutTitular) : null,
-      version_seq: 1, monto_total: montoTotal,
-      cuotas: esConvenio ? [
-        { numero_cuota: 1, monto_cuota: (Number(montoTotal) / 2).toString(), mes_ejecucion: '2026-11-30' },
-        { numero_cuota: 2, monto_cuota: (Number(montoTotal) / 2).toString(), mes_ejecucion: '2026-12-30' }
-      ] : [],
-      fecha_creacion: new Date().toISOString(), sincronizado: false, estado: 'en_cola', conflicto_msg: null
+      rut_titular_pago: tipoUsuario === 'Convenio' ? formatearRUT(rutTitular) : null,
+      version_seq: 1,
+      monto_total: montoTotal,
+      cuotas: cuotasArray,
+      fecha_creacion: new Date().toISOString(),
+      sincronizado: false,
+      estado: 'en_cola',
+      conflicto_msg: null,
     });
-    setRutPaciente(''); setErrorRutPaciente(''); setRutTitular(''); setErrorRutTitular(''); setSkuSeleccionado('');
-    cargarDatosLocales();
-    setMensajeSync(`✓ Folio ${nuevoFolio} guardado en IndexedDB.`);
+
+    // Reset wizard
+    setRutPaciente('');
+    setNombrePaciente('');
+    setErrorRutPaciente('');
+    setRutTitular('');
+    setErrorRutTitular('');
+    setSkuSeleccionado('');
+    setRecetaActiva(null);
+    setAutorizacionBiometrica(false);
+    setCurrentStep(1);
+
+    await cargarDatosLocales();
+    setMensajeSync(`✓ Folio ${nuevoFolio} registrado y encolado en base local.`);
   };
 
+  // Sincronización y Limpieza de Cola
   const handleSincronizar = async () => {
+    setSincronizando(true);
     setMensajeSync('Sincronizando cola con el servidor Django...');
     try {
       const res = await sincronizarColaOffline();
       setMensajeSync(`Completado: ${res.procesados.length} procesados, ${res.conflictos.length} conflictos.`);
-      cargarDatosLocales();
-    } catch (err) { setMensajeSync(`Fallo: ${err instanceof Error ? err.message : 'Error desconocido'}`); }
+      await cargarDatosLocales();
+    } catch (err) {
+      setMensajeSync(`Fallo: ${err instanceof Error ? err.message : 'Error desconocido'}`);
+    } finally {
+      setSincronizando(false);
+    }
   };
 
   const handleLimpiarSincronizados = async () => {
     const n = await limpiarSincronizados();
-    setMensajeSync(`${n} registro(s) sincronizado(s) eliminados.`);
-    cargarDatosLocales();
+    setMensajeSync(`${n} registro(s) sincronizado(s) eliminados de la cola local.`);
+    await cargarDatosLocales();
+  };
+
+  const handleRecetaGuardada = (receta: RecetaOpticaItem) => {
+    setRecetaActiva(receta);
+    setTipoReceta('vigente');
+    setMensajeSync(`✓ Receta ${receta.id_receta.slice(0, 8)} asociada con vigencia confirmada.`);
   };
 
   const BadgeEstado = ({ item }: { item: PedidoOfflineQueue }) => {
-    if (item.estado === 'sincronizado') return <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950/80 text-emerald-400 border border-emerald-800">Sincronizado</span>;
-    if (item.estado === 'conflicto') return <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-red-950/80 text-red-400 border border-red-800">Conflicto</span>;
-    return <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-950/80 text-amber-400 border border-amber-800">En Cola</span>;
+    if (item.estado === 'sincronizado') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800">
+          <CheckCircle2 size={11} /> Sincronizado
+        </span>
+      );
+    }
+    if (item.estado === 'conflicto') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-800 dark:bg-red-950/80 dark:text-red-400 border border-red-300 dark:border-red-800">
+          <AlertTriangle size={11} /> Conflicto
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-400 border border-amber-300 dark:border-amber-800">
+        <Clock size={11} /> En Cola
+      </span>
+    );
   };
 
-  const formularioValido = formularioEsValido();
+  const pendientesCount = colaPendiente.filter((p) => p.estado === 'en_cola').length;
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-      {/* Formulario */}
-      <section className="bg-[#121826] border border-[#2A364F] p-6 rounded-xl shadow-lg">
-        <h2 className="text-base font-bold mb-4 text-[#FF5500]">Registro de Solicitud de EPP Óptico</h2>
-        <form onSubmit={handleRegistrarPedido} className="space-y-4" noValidate>
+    <>
+      {/* ── Header del Módulo ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-amaru-copper/10 dark:bg-amaru-copper/20 text-amaru-copper rounded-2xl border border-amaru-copper/20 shadow-xs">
+            <ShieldCheck size={26} className="text-amaru-copper" />
+          </div>
           <div>
-            <label className="block text-xs uppercase tracking-wider text-zinc-400 mb-1">RUT Paciente Trabajador</label>
-            <input type="text" placeholder="12345678-9" value={rutPaciente} onChange={handleRutPacienteChange} onBlur={handleRutPacienteBlur} maxLength={12}
-              className={`w-full bg-[#1A2234] border rounded-lg px-3 py-2.5 text-sm text-white outline-none transition-colors ${errorRutPaciente ? 'border-red-500' : rutPaciente && validarRUT(rutPaciente) ? 'border-emerald-600' : 'border-[#2A364F] focus:border-[#FF5500]'}`} />
-            {errorRutPaciente && <p className="text-red-400 text-[11px] mt-1">⚠ {errorRutPaciente}</p>}
-          </div>
-
-          <div className="flex items-center space-x-2">
-            <input type="checkbox" id="receta" checked={tieneRecetaVigente} onChange={(e) => setTieneRecetaVigente(e.target.checked)} className="h-4 w-4 rounded border-[#2A364F] bg-[#1A2234] accent-[#FF5500]" />
-            <label htmlFor="receta" className="text-xs text-zinc-300 cursor-pointer">¿Posee receta óptica vigente (&lt; 365 días)?</label>
-          </div>
-
-          {!tieneRecetaVigente ? (
-            <div className="bg-amber-950/40 border border-amber-600/50 p-4 rounded-lg text-xs text-amber-200 space-y-2">
-              <p className="font-semibold text-amber-300">Embudo de Retención Activado:</p>
-              <p>Sin receta vigente no se permite la fabricación de EPP correctivo.</p>
-              <button type="button" className="w-full bg-amber-600 hover:bg-amber-500 text-white font-medium py-2 rounded-lg text-xs uppercase tracking-wider transition-colors cursor-pointer">Agendar Evaluación Oftalmológica</button>
+            <div className="flex items-center gap-2.5">
+              <h2 className="text-xl font-bold tracking-tight text-[#201E1C] dark:text-white">
+                Terminal Asistido de Captura (Wizard)
+              </h2>
+              <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-full text-[11px] font-semibold">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                Terminal Offline Activo
+              </div>
             </div>
-          ) : (
-            <>
-              <div>
-                <label className="block text-xs uppercase tracking-wider text-zinc-400 mb-1">Modelo / SKU Armazón</label>
-                <select value={skuSeleccionado} onChange={(e) => { const s = e.target.value; setSkuSeleccionado(s); setMontoTotal(s === 'EPP-MIN-001' ? '85000' : s === 'EPP-MIN-002' ? '92000' : '85000'); }}
-                  className="w-full bg-[#1A2234] border border-[#2A364F] rounded-lg px-3 py-2.5 text-sm text-white focus:border-[#FF5500] outline-none transition-colors">
-                  <option value="">-- Seleccionar Armazón Certificado --</option>
-                  <option value="EPP-MIN-001">Titanium Shield Industrial Pro ($85.000)</option>
-                  <option value="EPP-MIN-002">Vulcan Flex Faena Extreme ($92.000)</option>
-                </select>
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <input type="checkbox" id="convenio" checked={esConvenio} onChange={(e) => setEsConvenio(e.target.checked)} className="h-4 w-4 rounded border-[#2A364F] bg-[#1A2234] accent-[#FF5500]" />
-                <label htmlFor="convenio" className="text-xs text-zinc-300 cursor-pointer">Afecto a Convenio Sindical (Descuento por planilla)</label>
-              </div>
-
-              <div>
-                <label className={`block text-xs uppercase tracking-wider mb-1 ${esConvenio ? 'text-zinc-400' : 'text-zinc-600'}`}>
-                  RUT Titular Descuento {esConvenio && <span className="text-[#FF5500]">*</span>}
-                </label>
-                <input type="text" placeholder={esConvenio ? '12345678-9' : 'No aplica'} value={rutTitular} onChange={handleRutTitularChange} onBlur={handleRutTitularBlur} disabled={!esConvenio} maxLength={12}
-                  className={`w-full bg-[#1A2234] border rounded-lg px-3 py-2.5 text-sm outline-none transition-colors ${!esConvenio ? 'text-zinc-600 border-[#1A2234] cursor-not-allowed' : errorRutTitular ? 'text-white border-red-500' : rutTitular && validarRUT(rutTitular) ? 'text-white border-emerald-600' : 'text-white border-[#2A364F] focus:border-[#FF5500]'}`} />
-                {esConvenio && errorRutTitular && <p className="text-red-400 text-[11px] mt-1">⚠ {errorRutTitular}</p>}
-              </div>
-
-              <button type="submit" disabled={!formularioValido}
-                className={`w-full font-semibold py-2.5 rounded-lg text-sm tracking-wide transition-colors shadow-lg ${formularioValido ? 'bg-[#FF5500] hover:bg-[#E04B00] text-white cursor-pointer' : 'bg-zinc-800 text-zinc-500 border border-zinc-700 cursor-not-allowed'}`}>
-                Generar Folio y Guardar en Local
-              </button>
-            </>
-          )}
-        </form>
-      </section>
-
-      {/* Cola FIFO */}
-      <section className="bg-[#121826] border border-[#2A364F] p-6 rounded-xl shadow-lg flex flex-col justify-between">
-        <div>
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-base font-bold text-white">Cola FIFO Offline (Dexie.js)</h2>
-            <div className="flex items-center gap-2">
-              <span className="text-xs bg-[#1A2234] border border-[#2A364F] px-2.5 py-1 rounded-md text-[#FF5500] font-semibold">
-                {colaPendiente.filter(p => p.estado === 'en_cola').length} pendientes
-              </span>
-              <button onClick={handleLimpiarSincronizados} className="text-[10px] font-medium text-zinc-500 hover:text-zinc-300 border border-[#2A364F] hover:border-zinc-500 px-2 py-1 rounded-md transition-colors cursor-pointer">
-                Limpiar sincronizados
-              </button>
-            </div>
-          </div>
-          <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
-            {colaPendiente.length === 0 ? (
-              <p className="text-xs text-zinc-500 text-center py-8">No hay pedidos registrados en la base local.</p>
-            ) : colaPendiente.map(item => (
-              <div key={item.folio_unico_qr} className="bg-[#1A2234] border border-[#2A364F] p-3 rounded-lg text-xs">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="font-mono text-[#FF5500] font-bold">{item.folio_unico_qr}</p>
-                    <p className="text-zinc-400 mt-0.5">Paciente: {item.rut_paciente} | SKU: {item.sku_armazon}</p>
-                  </div>
-                  <BadgeEstado item={item} />
-                </div>
-                {item.estado === 'conflicto' && item.conflicto_msg && (
-                  <p className="mt-1.5 text-red-400 text-[11px] bg-red-950/30 border border-red-900/50 rounded px-2 py-1">⚠ Conflicto: {item.conflicto_msg}</p>
-                )}
-              </div>
-            ))}
+            <p className="text-xs text-[#6C6A68] dark:text-amaru-light-gray mt-0.5">
+              Flujo guiado en 3 pasos con validación biométrica, embudo clínico y cotización
+            </p>
           </div>
         </div>
-        <div className="mt-4 pt-4 border-t border-[#2A364F]">
-          {mensajeSync && <p className="text-xs text-zinc-400 mb-3 font-mono">{mensajeSync}</p>}
-          <button onClick={handleSincronizar} disabled={!isOnline}
-            className={`w-full py-2.5 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${isOnline ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-zinc-800 text-zinc-600 cursor-not-allowed border border-zinc-700'}`}>
-            {isOnline ? 'Sincronizar Cola con Servidor (POST /sync-batch/)' : 'Sin Conexión a Red'}
+
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => {
+              setFolioPhygital('');
+              setMostrarPhygital(true);
+            }}
+            className="flex items-center gap-1.5 text-xs font-semibold text-amaru-copper dark:text-amber-400 bg-white dark:bg-amaru-surface-dark border border-amaru-copper/40 hover:bg-amaru-copper hover:text-white px-3.5 py-2 rounded-xl shadow-xs transition-all duration-200 cursor-pointer active:scale-95"
+          >
+            <Camera size={15} />
+            <span>Captura Phygital</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMostrarModalReceta(true)}
+            className="flex items-center gap-1.5 text-xs font-semibold text-white bg-gradient-to-r from-amaru-copper to-amaru-earth hover:from-amaru-earth hover:to-amaru-copper px-3.5 py-2 rounded-xl shadow-sm transition-all duration-200 cursor-pointer active:scale-95"
+          >
+            <FilePlus size={15} />
+            <span>+ Nueva Receta</span>
           </button>
         </div>
-      </section>
-    </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* ── Asistente por Pasos (Wizard - Izquierda) ── */}
+        <section className="lg:col-span-7 bg-white dark:bg-amaru-surface-dark border border-slate-200 dark:border-[#3E3A36] p-6 rounded-2xl shadow-sm dark:shadow-xl transition-all">
+          {/* Barra de Progreso del Asistente */}
+          <div className="mb-6 pb-4 border-b border-slate-100 dark:border-[#3E3A36]">
+            <div className="flex items-center justify-between">
+              {[
+                { step: 1, label: 'Filiación' },
+                { step: 2, label: 'Clínica & Embudo' },
+                { step: 3, label: 'Cotización & Pago' },
+              ].map((item, idx) => {
+                const isActive = currentStep === item.step;
+                const isCompleted = currentStep > item.step;
+                return (
+                  <div key={item.step} className="flex items-center flex-1">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                          isActive
+                            ? 'bg-amaru-copper text-white shadow-md shadow-amaru-copper/30 ring-2 ring-amaru-copper/30'
+                            : isCompleted
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-slate-100 dark:bg-amaru-dark text-amaru-steel dark:text-amaru-light-gray'
+                        }`}
+                      >
+                        {isCompleted ? <Check size={14} /> : item.step}
+                      </div>
+                      <span
+                        className={`text-xs font-semibold hidden sm:inline ${
+                          isActive
+                            ? 'text-amaru-copper font-bold'
+                            : isCompleted
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : 'text-amaru-steel dark:text-amaru-light-gray'
+                        }`}
+                      >
+                        {item.label}
+                      </span>
+                    </div>
+                    {idx < 2 && (
+                      <div
+                        className={`flex-1 h-0.5 mx-2 rounded transition-colors ${
+                          currentStep > item.step ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-[#3E3A36]'
+                        }`}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ════════════ PASO 1: FILIACIÓN Y CONTEXTO ════════════ */}
+          {currentStep === 1 && (
+            <div className="space-y-4 animate-in fade-in duration-200">
+              <div className="pb-2">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-amaru-copper flex items-center gap-2">
+                  <User size={18} />
+                  Paso 1: Filiación y Contexto Laboral
+                </h3>
+                <p className="text-xs text-[#6C6A68] dark:text-amaru-light-gray mt-0.5">
+                  Identificación del trabajador y consentimiento legal Ley N° 19.628
+                </p>
+              </div>
+
+              {/* RUT Paciente */}
+              <div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-amaru-gray dark:text-amaru-light-gray">
+                    RUT Paciente Trabajador <span className="text-amaru-copper">*</span>
+                  </label>
+                  {rutPaciente && validarRUT(rutPaciente) && (
+                    <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                      <CheckCircle2 size={12} /> RUT Válido
+                    </span>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  placeholder="12345678-9"
+                  value={rutPaciente}
+                  onChange={handleRutPacienteChange}
+                  onBlur={handleRutPacienteBlur}
+                  maxLength={12}
+                  className={`w-full bg-white dark:bg-[#1E1C1A] border rounded-xl px-3.5 py-2.5 text-sm text-[#201E1C] dark:text-[#F5F5F4] placeholder:text-slate-400 dark:placeholder:text-amaru-steel outline-none transition-all ${
+                    errorRutPaciente
+                      ? 'border-red-500 focus:ring-2 focus:ring-red-400'
+                      : rutPaciente && validarRUT(rutPaciente)
+                      ? 'border-emerald-600 focus:ring-2 focus:ring-emerald-400'
+                      : 'border-slate-300 dark:border-[#4A4540] focus:ring-2 focus:ring-amaru-copper'
+                  }`}
+                />
+                {errorRutPaciente && (
+                  <p className="text-red-500 text-[11px] mt-1 font-medium flex items-center gap-1">
+                    <AlertTriangle size={12} /> {errorRutPaciente}
+                  </p>
+                )}
+              </div>
+
+              {/* Nombre Completo */}
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-amaru-gray dark:text-amaru-light-gray mb-1.5">
+                  Nombre Completo del Trabajador <span className="text-amaru-copper">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej: Juan Pérez González"
+                  value={nombrePaciente}
+                  onChange={(e) => setNombrePaciente(e.target.value)}
+                  className="w-full bg-white dark:bg-[#1E1C1A] border border-slate-300 dark:border-[#4A4540] focus:ring-2 focus:ring-amaru-copper rounded-xl px-3.5 py-2.5 text-sm text-[#201E1C] dark:text-[#F5F5F4] placeholder:text-slate-400 dark:placeholder:text-amaru-steel outline-none transition-all"
+                />
+              </div>
+
+              {/* Selector Tipo de Usuario: Particular / Convenio */}
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-amaru-gray dark:text-amaru-light-gray mb-1.5">
+                  Tipo de Usuario <span className="text-amaru-copper">*</span>
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  {(['Convenio', 'Particular'] as const).map((tipo) => (
+                    <button
+                      key={tipo}
+                      type="button"
+                      onClick={() => setTipoUsuario(tipo)}
+                      className={`p-3 rounded-xl border text-xs font-semibold flex items-center justify-between transition-all cursor-pointer ${
+                        tipoUsuario === tipo
+                          ? 'border-amaru-copper bg-amaru-copper/10 ring-2 ring-amaru-copper text-amaru-copper dark:text-amber-400'
+                          : 'border-slate-200 dark:border-[#3E3A36] bg-slate-50 dark:bg-[#1E1C1A] text-[#201E1C] dark:text-amaru-light-gray'
+                      }`}
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Building size={14} />
+                        {tipo === 'Convenio' ? 'Convenio Minero' : 'Particular'}
+                      </span>
+                      {tipoUsuario === tipo && <CheckCircle2 size={15} />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Selector Empresa (Sindicato) */}
+              {tipoUsuario === 'Convenio' && (
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-amaru-gray dark:text-amaru-light-gray mb-1.5">
+                    Empresa / Sindicato en Faena <span className="text-amaru-copper">*</span>
+                  </label>
+                  <select
+                    value={empresaSeleccionada}
+                    onChange={(e) => setEmpresaSeleccionada(e.target.value)}
+                    className="w-full bg-white dark:bg-[#1E1C1A] border border-slate-300 dark:border-[#4A4540] rounded-xl px-3.5 py-2.5 text-sm text-[#201E1C] dark:text-[#F5F5F4] focus:ring-2 focus:ring-amaru-copper outline-none transition-all"
+                  >
+                    {EMPRESAS_CONVENIO.map((emp) => (
+                      <option key={emp} value={emp}>
+                        {emp}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Checkbox Autorización Biométrica Ley N° 19.628 */}
+              <div className="bg-slate-50 dark:bg-[#1E1C1A] border border-slate-200 dark:border-[#3E3A36] p-3.5 rounded-xl">
+                <label className="flex items-start space-x-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autorizacionBiometrica}
+                    onChange={(e) => setAutorizacionBiometrica(e.target.checked)}
+                    className="h-4 w-4 mt-0.5 rounded border-slate-300 dark:border-[#4A4540] bg-white dark:bg-[#282523] accent-amaru-copper cursor-pointer shrink-0"
+                  />
+                  <span className="text-xs text-[#524944] dark:text-zinc-200 leading-tight">
+                    <strong className="text-[#201E1C] dark:text-white">
+                      Autorización Biométrica Ley N° 19.628:
+                    </strong>{' '}
+                    El trabajador autoriza el tratamiento y captura de sus datos biométricos, refracción oftalmológica y entrega de EPP en faena.
+                  </span>
+                </label>
+              </div>
+
+              {/* Botón Siguiente Paso */}
+              <div className="pt-2">
+                <button
+                  type="button"
+                  disabled={!paso1Valido}
+                  onClick={() => setCurrentStep(2)}
+                  className={`w-full font-semibold rounded-xl text-sm py-3.5 transition-all flex items-center justify-center gap-2 shadow-md ${
+                    paso1Valido
+                      ? 'bg-gradient-to-r from-amaru-copper to-amaru-earth hover:from-amaru-earth hover:to-amaru-copper text-white shadow-amaru-copper/20 cursor-pointer active:scale-[0.99]'
+                      : 'bg-slate-200 text-slate-400 dark:bg-[#1E1C1A] dark:text-zinc-600 border border-slate-300 dark:border-[#3E3A36] cursor-not-allowed shadow-none'
+                  }`}
+                >
+                  <span>Continuar a Validación Clínica (Paso 2)</span>
+                  <ArrowRight size={16} />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ════════════ PASO 2: VALIDACIÓN CLÍNICA Y EMBUDO ════════════ */}
+          {currentStep === 2 && (
+            <div className="space-y-5 animate-in fade-in duration-200">
+              <div className="pb-2">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-amaru-copper flex items-center gap-2">
+                  <Glasses size={18} />
+                  Paso 2: Validación Clínica y Embudo Normativo
+                </h3>
+                <p className="text-xs text-[#6C6A68] dark:text-amaru-light-gray mt-0.5">
+                  Verificación de vigencia médica (&lt; 365 días) según D.S. 594
+                </p>
+              </div>
+
+              {/* Pregunta Inicial con Radio Buttons */}
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-amaru-gray dark:text-amaru-light-gray">
+                  ¿Estado de la Receta Médica Oftalmológica? <span className="text-amaru-copper">*</span>
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div
+                    onClick={() => setTipoReceta('vigente')}
+                    className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-start gap-2.5 ${
+                      tipoReceta === 'vigente'
+                        ? 'border-emerald-600 bg-emerald-50/50 dark:bg-emerald-950/30 ring-2 ring-emerald-600'
+                        : 'border-slate-200 dark:border-[#3E3A36] bg-slate-50 dark:bg-[#1E1C1A]'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="tipoReceta"
+                      checked={tipoReceta === 'vigente'}
+                      onChange={() => setTipoReceta('vigente')}
+                      className="mt-0.5 text-emerald-600 accent-emerald-600 cursor-pointer"
+                    />
+                    <div>
+                      <p className="text-xs font-bold text-[#201E1C] dark:text-white">
+                        1) Poseo receta vigente (&lt; 365 días)
+                      </p>
+                      <p className="text-[11px] text-[#6C6A68] dark:text-amaru-light-gray mt-0.5">
+                        Permite seleccionar armazón y pasar a cotización
+                      </p>
+                    </div>
+                  </div>
+
+                  <div
+                    onClick={() => {
+                      setTipoReceta('vencida');
+                      setSkuSeleccionado('');
+                    }}
+                    className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-start gap-2.5 ${
+                      tipoReceta === 'vencida'
+                        ? 'border-amber-600 bg-amber-50/50 dark:bg-amber-950/30 ring-2 ring-amber-600'
+                        : 'border-slate-200 dark:border-[#3E3A36] bg-slate-50 dark:bg-[#1E1C1A]'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="tipoReceta"
+                      checked={tipoReceta === 'vencida'}
+                      onChange={() => {
+                        setTipoReceta('vencida');
+                        setSkuSeleccionado('');
+                      }}
+                      className="mt-0.5 text-amber-600 accent-amber-600 cursor-pointer"
+                    />
+                    <div>
+                      <p className="text-xs font-bold text-amber-800 dark:text-amber-300">
+                        2) No poseo receta o requiere actualización
+                      </p>
+                      <p className="text-[11px] text-[#6C6A68] dark:text-amaru-light-gray mt-0.5">
+                        Activa embudo y agenda evaluación en policlínico
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── RAMA 1: Receta Vigente ── */}
+              {tipoReceta === 'vigente' && (
+                <div className="space-y-4 pt-1">
+                  {/* Ficha de Refracción o Botón para ingresar receta */}
+                  {recetaActiva ? (
+                    <div className="bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/60 rounded-xl p-4 transition-all">
+                      <div className="flex items-center justify-between pb-2 mb-2 border-b border-emerald-200/60 dark:border-emerald-900/40">
+                        <div className="flex items-center gap-2">
+                          <Eye size={15} className="text-emerald-700 dark:text-emerald-300" />
+                          <h4 className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                            Ficha de Refracción Oftalmológica
+                          </h4>
+                          <span className="text-[10px] font-mono text-emerald-700 dark:text-emerald-400">
+                            (ID: {recetaActiva.id_receta.slice(0, 8)})
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setRecetaActiva(null)}
+                          className="text-[11px] text-red-600 hover:underline cursor-pointer"
+                        >
+                          Quitar
+                        </button>
+                      </div>
+
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-[11px] text-left">
+                          <thead>
+                            <tr className="border-b border-emerald-200/50 dark:border-emerald-900/40 text-emerald-800 dark:text-emerald-300 font-semibold uppercase">
+                              <th className="py-1 px-2">Ojo</th>
+                              <th className="py-1 px-2 text-center">SPH</th>
+                              <th className="py-1 px-2 text-center">CYL</th>
+                              <th className="py-1 px-2 text-center">AXIS</th>
+                              <th className="py-1 px-2 text-center">ADD</th>
+                              <th className="py-1 px-2 text-center">DP</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-emerald-100 dark:divide-emerald-900/30 font-mono text-[#201E1C] dark:text-[#F5F5F4]">
+                            <tr>
+                              <td className="py-1 px-2 font-bold text-amaru-copper">OD</td>
+                              <td className="py-1 px-2 text-center">{recetaActiva.parametros_oftalmologicos.ojo_derecho.esfera ?? '-'}</td>
+                              <td className="py-1 px-2 text-center">{recetaActiva.parametros_oftalmologicos.ojo_derecho.cilindro ?? '-'}</td>
+                              <td className="py-1 px-2 text-center">{recetaActiva.parametros_oftalmologicos.ojo_derecho.eje ?? '-'}°</td>
+                              <td className="py-1 px-2 text-center">{recetaActiva.parametros_oftalmologicos.ojo_derecho.adicion ?? '-'}</td>
+                              <td className="py-1 px-2 text-center">{recetaActiva.parametros_oftalmologicos.ojo_derecho.dp ?? '-'}</td>
+                            </tr>
+                            <tr>
+                              <td className="py-1 px-2 font-bold text-amaru-copper">OI</td>
+                              <td className="py-1 px-2 text-center">{recetaActiva.parametros_oftalmologicos.ojo_izquierdo.esfera ?? '-'}</td>
+                              <td className="py-1 px-2 text-center">{recetaActiva.parametros_oftalmologicos.ojo_izquierdo.cilindro ?? '-'}</td>
+                              <td className="py-1 px-2 text-center">{recetaActiva.parametros_oftalmologicos.ojo_izquierdo.eje ?? '-'}°</td>
+                              <td className="py-1 px-2 text-center">{recetaActiva.parametros_oftalmologicos.ojo_izquierdo.adicion ?? '-'}</td>
+                              <td className="py-1 px-2 text-center">{recetaActiva.parametros_oftalmologicos.ojo_izquierdo.dp ?? '-'}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between bg-slate-50 dark:bg-[#1E1C1A] border border-slate-200 dark:border-[#3E3A36] p-3.5 rounded-xl">
+                      <div>
+                        <p className="text-xs font-semibold text-[#201E1C] dark:text-white">
+                          Parámetros de Refracción
+                        </p>
+                        <p className="text-[11px] text-[#6C6A68] dark:text-amaru-light-gray">
+                          Asocie los datos OD/OI de la receta para el lente correctivo
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setMostrarModalReceta(true)}
+                        className="text-xs font-semibold text-amaru-copper border border-amaru-copper/40 hover:bg-amaru-copper hover:text-white px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                      >
+                        + Ingresar Receta
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Catálogo de Armazones Certificados */}
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-amaru-gray dark:text-amaru-light-gray mb-2">
+                      Catálogo de Armazones Certificados (D.S. 594) <span className="text-amaru-copper">*</span>
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {armazonesList.map((arm) => {
+                        const isSelected = skuSeleccionado === arm.sku_armazon;
+                        return (
+                          <div
+                            key={arm.sku_armazon}
+                            onClick={() => {
+                              setSkuSeleccionado(arm.sku_armazon);
+                              setMontoTotal(arm.precio_clp.toString());
+                            }}
+                            className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                              isSelected
+                                ? 'border-amaru-copper bg-amaru-copper/5 dark:bg-amaru-copper/10 ring-2 ring-amaru-copper'
+                                : 'border-slate-200 dark:border-[#3E3A36] bg-slate-50/70 dark:bg-[#1E1C1A] hover:border-slate-300'
+                            }`}
+                          >
+                            <div className="flex justify-between items-start gap-2 mb-1">
+                              <span className="font-mono text-[11px] font-bold text-amaru-copper bg-amaru-copper/10 px-2 py-0.5 rounded">
+                                {arm.sku_armazon}
+                              </span>
+                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-400">
+                                Stock: {arm.stock_disponible} un.
+                              </span>
+                            </div>
+                            <h5 className="text-xs font-bold text-[#201E1C] dark:text-[#F5F5F4] mb-1">
+                              {arm.modelo_lente}
+                            </h5>
+                            <div className="flex justify-between items-center pt-2 border-t border-slate-200/60 dark:border-[#3E3A36]/60">
+                              <span className="text-[11px] text-[#6C6A68] dark:text-amaru-light-gray">Precio CLP:</span>
+                              <span className="text-sm font-extrabold text-[#201E1C] dark:text-white">
+                                ${arm.precio_clp.toLocaleString('es-CL')}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Acciones de Navegación Rama 1 */}
+                  <div className="flex items-center gap-3 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => setCurrentStep(1)}
+                      className="px-4 py-3 rounded-xl border border-slate-300 dark:border-[#3E3A36] text-xs font-semibold text-[#6C6A68] dark:text-amaru-light-gray hover:text-[#201E1C] dark:hover:text-white transition-colors cursor-pointer flex items-center gap-1.5"
+                    >
+                      <ArrowLeft size={15} />
+                      <span>Volver</span>
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!paso2Valido}
+                      onClick={() => setCurrentStep(3)}
+                      className={`flex-1 font-semibold rounded-xl text-sm py-3 transition-all flex items-center justify-center gap-2 shadow-md ${
+                        paso2Valido
+                          ? 'bg-gradient-to-r from-amaru-copper to-amaru-earth hover:from-amaru-earth hover:to-amaru-copper text-white shadow-amaru-copper/20 cursor-pointer active:scale-[0.99]'
+                          : 'bg-slate-200 text-slate-400 dark:bg-[#1E1C1A] dark:text-zinc-600 border border-slate-300 dark:border-[#3E3A36] cursor-not-allowed shadow-none'
+                      }`}
+                    >
+                      <span>Continuar a Cotización y Pago (Paso 3)</span>
+                      <ArrowRight size={16} />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ── RAMA 2: No Poseo Receta o Requiere Actualización (EMBUDO ACTIVO: OCULTA CATÁLOGO Y PAGO) ── */}
+              {tipoReceta === 'vencida' && (
+                <div className="space-y-4 pt-1 animate-in fade-in duration-200">
+                  <ReservaHoraWidget
+                    rutPaciente={rutPaciente}
+                    nombrePaciente={nombrePaciente}
+                    onVolverInicio={handleLimpiarTodo}
+                    onReservaExitosa={(detalle) => {
+                      setMensajeSync(
+                        `✓ Evaluación oftalmológica agendada para ${detalle.rut}: ${detalle.fecha} (${detalle.bloque}).`
+                      );
+                    }}
+                  />
+
+                  <div className="flex items-center gap-3 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setCurrentStep(1)}
+                      className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-[#3E3A36] text-xs font-semibold text-[#6C6A68] dark:text-amaru-light-gray hover:text-[#201E1C] dark:hover:text-white transition-colors cursor-pointer flex items-center gap-1.5"
+                    >
+                      <ArrowLeft size={14} />
+                      <span>Volver a Filiación (Paso 1)</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ════════════ PASO 3: COTIZACIÓN Y PAGO ════════════ */}
+          {currentStep === 3 && (
+            <form onSubmit={handleFinalizarPedido} className="space-y-5 animate-in fade-in duration-200" noValidate>
+              <div className="pb-2">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-amaru-copper flex items-center gap-2">
+                  <CreditCard size={18} />
+                  Paso 3: Cotización y Modalidad de Pago
+                </h3>
+                <p className="text-xs text-[#6C6A68] dark:text-amaru-light-gray mt-0.5">
+                  Desacople del RUT titular y definición de cuotas por planilla
+                </p>
+              </div>
+
+              {/* RUT Titular Independiente */}
+              <div className="bg-slate-50 dark:bg-[#1E1C1A] border border-slate-200 dark:border-[#3E3A36] p-4 rounded-xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-amaru-gray dark:text-amaru-light-gray">
+                    RUT del Titular (Socio del Convenio) <span className="text-amaru-copper">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nuevo = !esMismoTitular;
+                      setEsMismoTitular(nuevo);
+                      if (nuevo && rutPaciente) setRutTitular(rutPaciente);
+                    }}
+                    className="text-[11px] font-semibold text-amaru-copper hover:underline cursor-pointer"
+                  >
+                    {esMismoTitular ? '✓ Es el mismo trabajador' : '+ Ingresar RUT distinto'}
+                  </button>
+                </div>
+
+                <input
+                  type="text"
+                  placeholder="12345678-9"
+                  value={rutTitular}
+                  onChange={handleRutTitularChange}
+                  onBlur={handleRutTitularBlur}
+                  disabled={esMismoTitular}
+                  maxLength={12}
+                  className={`w-full bg-white dark:bg-amaru-surface-dark border rounded-xl px-3.5 py-2.5 text-sm outline-none transition-all ${
+                    esMismoTitular
+                      ? 'bg-slate-100 dark:bg-amaru-dark text-amaru-steel cursor-not-allowed'
+                      : errorRutTitular
+                      ? 'border-red-500 text-red-600 focus:ring-2 focus:ring-red-400'
+                      : rutTitular && validarRUT(rutTitular)
+                      ? 'border-emerald-600 focus:ring-2 focus:ring-emerald-400'
+                      : 'border-slate-300 dark:border-[#4A4540] focus:ring-2 focus:ring-amaru-copper'
+                  }`}
+                />
+                {errorRutTitular && (
+                  <p className="text-red-500 text-[11px] mt-1 font-medium flex items-center gap-1">
+                    <AlertTriangle size={12} /> {errorRutTitular}
+                  </p>
+                )}
+              </div>
+
+              {/* Selector de Cuotas (1 a 4) */}
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-amaru-gray dark:text-amaru-light-gray mb-2">
+                  Número de Cuotas por Planilla (1 a 4) <span className="text-amaru-copper">*</span>
+                </label>
+                <div className="grid grid-cols-4 gap-2">
+                  {[1, 2, 3, 4].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => setNumCuotas(n)}
+                      className={`py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                        numCuotas === n
+                          ? 'border-amaru-copper bg-amaru-copper text-white shadow-sm ring-2 ring-amaru-copper/30'
+                          : 'border-slate-200 dark:border-[#3E3A36] bg-slate-50 dark:bg-[#1E1C1A] text-[#201E1C] dark:text-amaru-light-gray hover:border-slate-300'
+                      }`}
+                    >
+                      {n} {n === 1 ? 'Cuota' : 'Cuotas'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Resumen de Cotización */}
+              <div className="bg-slate-50 dark:bg-[#1E1C1A] border border-slate-200 dark:border-[#3E3A36] rounded-xl p-4 text-xs space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-[#6C6A68] dark:text-amaru-light-gray">Armazón EPP:</span>
+                  <span className="font-semibold text-[#201E1C] dark:text-white font-mono">{skuSeleccionado}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-[#6C6A68] dark:text-amaru-light-gray">Monto Total:</span>
+                  <span className="font-bold text-sm text-[#201E1C] dark:text-white">
+                    ${Number(montoTotal).toLocaleString('es-CL')} CLP
+                  </span>
+                </div>
+                <div className="flex justify-between items-center pt-2 border-t border-slate-200 dark:border-[#3E3A36]">
+                  <span className="text-amaru-copper font-semibold">Valor por Cuota:</span>
+                  <span className="font-bold text-amaru-copper text-sm">
+                    {numCuotas}x ${Math.round(Number(montoTotal) / numCuotas).toLocaleString('es-CL')} CLP
+                  </span>
+                </div>
+              </div>
+
+              {/* Acciones de Navegación y Guardado */}
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setCurrentStep(2)}
+                  className="px-4 py-3.5 rounded-xl border border-slate-300 dark:border-[#3E3A36] text-xs font-semibold text-[#6C6A68] dark:text-amaru-light-gray hover:text-[#201E1C] dark:hover:text-white transition-colors cursor-pointer flex items-center gap-1.5"
+                >
+                  <ArrowLeft size={15} />
+                  <span>Volver a Clínica</span>
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={!paso3Valido}
+                  className={`flex-1 font-semibold rounded-xl text-sm py-3.5 transition-all flex items-center justify-center gap-2 shadow-md ${
+                    paso3Valido
+                      ? 'bg-gradient-to-r from-amaru-copper to-amaru-earth hover:from-amaru-earth hover:to-amaru-copper text-white shadow-amaru-copper/20 cursor-pointer active:scale-[0.99]'
+                      : 'bg-slate-200 text-slate-400 dark:bg-[#1E1C1A] dark:text-zinc-600 border border-slate-300 dark:border-[#3E3A36] cursor-not-allowed shadow-none'
+                  }`}
+                >
+                  <QrCode size={17} />
+                  <span>Generar Folio y Guardar en Local</span>
+                </button>
+              </div>
+            </form>
+          )}
+        </section>
+
+        {/* ── Cola FIFO Offline Dexie.js (Derecha) ── */}
+        <section className="lg:col-span-5 bg-white dark:bg-amaru-surface-dark border border-slate-200 dark:border-[#3E3A36] p-6 rounded-2xl shadow-sm dark:shadow-xl flex flex-col justify-between transition-all">
+          <div>
+            <div className="flex justify-between items-center pb-4 mb-4 border-b border-slate-100 dark:border-[#3E3A36]">
+              <div>
+                <h3 className="text-sm font-bold uppercase tracking-wider text-[#201E1C] dark:text-white flex items-center gap-2">
+                  <Database size={18} className="text-amaru-copper" />
+                  Cola FIFO Offline
+                </h3>
+                <p className="text-xs text-[#6C6A68] dark:text-amaru-light-gray mt-0.5">
+                  IndexedDB reactiva en dispositivo
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs bg-amaru-copper/10 text-amaru-copper dark:text-amber-400 border border-amaru-copper/20 px-2.5 py-1 rounded-full font-bold">
+                  {pendientesCount} pendientes
+                </span>
+                {colaPendiente.some((p) => p.sincronizado) && (
+                  <button
+                    onClick={handleLimpiarSincronizados}
+                    title="Limpiar pedidos ya sincronizados"
+                    className="p-1.5 rounded-lg text-[#6C6A68] hover:text-red-600 dark:text-zinc-400 dark:hover:text-red-400 border border-slate-200 dark:border-[#3E3A36] hover:border-red-300 transition-colors cursor-pointer"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Listado de Solicitudes en Cola */}
+            <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
+              {colaPendiente.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+                  <div className="p-3.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-2xl mb-3 border border-emerald-500/20">
+                    <CheckCircle2 size={36} />
+                  </div>
+                  <h4 className="text-sm font-bold text-[#201E1C] dark:text-white mb-1">
+                    Cola local al día
+                  </h4>
+                  <p className="text-xs text-[#6C6A68] dark:text-amaru-light-gray max-w-xs leading-relaxed">
+                    No hay solicitudes pendientes en el almacenamiento local. Todas las capturas previas han sido conciliadas con el servidor.
+                  </p>
+                </div>
+              ) : (
+                colaPendiente.map((item) => (
+                  <div
+                    key={item.folio_unico_qr}
+                    className="bg-slate-50 dark:bg-[#1E1C1A] border border-slate-200 dark:border-[#3E3A36] p-3.5 rounded-xl text-xs space-y-2 hover:border-amaru-copper/40 transition-colors shadow-xs"
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="flex items-center gap-1.5 font-mono text-amaru-copper font-bold tracking-wide">
+                        <QrCode size={13} />
+                        <span>{item.folio_unico_qr}</span>
+                      </div>
+                      <BadgeEstado item={item} />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-[11px] text-[#524944] dark:text-zinc-300">
+                      <div>
+                        <span className="text-[#6C6A68] dark:text-amaru-light-gray">Paciente: </span>
+                        <span className="font-semibold">{item.rut_paciente}</span>
+                      </div>
+                      <div>
+                        <span className="text-[#6C6A68] dark:text-amaru-light-gray">Armazón: </span>
+                        <span className="font-semibold font-mono">{item.sku_armazon}</span>
+                      </div>
+                      <div>
+                        <span className="text-[#6C6A68] dark:text-amaru-light-gray">Total: </span>
+                        <span className="font-bold text-[#201E1C] dark:text-white">
+                          ${Number(item.monto_total).toLocaleString('es-CL')}
+                        </span>
+                      </div>
+                      {item.cuotas && item.cuotas.length > 0 && (
+                        <div>
+                          <span className="text-[#6C6A68] dark:text-amaru-light-gray">Cuotas: </span>
+                          <span className="font-semibold text-amaru-copper">
+                            {item.cuotas.length}x ${Math.round(Number(item.monto_total) / item.cuotas.length).toLocaleString('es-CL')}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {item.estado === 'conflicto' && item.conflicto_msg && (
+                      <div className="p-2 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-red-700 dark:text-red-300 text-[11px] flex items-start gap-1.5">
+                        <AlertTriangle size={13} className="shrink-0 mt-0.5" />
+                        <span>Conflicto: {item.conflicto_msg}</span>
+                      </div>
+                    )}
+
+                    {/* Botón rápido para subir respaldo Phygital si es convenio */}
+                    {item.cuotas && item.cuotas.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFolioPhygital(item.folio_unico_qr);
+                          setMostrarPhygital(true);
+                        }}
+                        className="mt-2 w-full py-1.5 px-2.5 bg-amaru-copper/10 hover:bg-amaru-copper text-amaru-copper hover:text-white border border-amaru-copper/30 rounded-lg text-[11px] font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Camera size={13} />
+                        <span>Subir Respaldo Sindical (Phygital)</span>
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Footer de Sincronización */}
+          <div className="mt-5 pt-4 border-t border-slate-200 dark:border-[#3E3A36]">
+            {mensajeSync && (
+              <p className="text-xs text-[#524944] dark:text-amaru-light-gray mb-3 font-mono flex items-center gap-1.5">
+                <span className="text-amaru-copper">●</span> {mensajeSync}
+              </p>
+            )}
+            <button
+              onClick={handleSincronizar}
+              disabled={!isOnline || sincronizando || pendientesCount === 0}
+              className={`w-full py-3 rounded-xl text-sm font-semibold transition-all duration-200 flex items-center justify-center gap-2 shadow-sm ${
+                isOnline && pendientesCount > 0
+                  ? 'bg-amaru-dark hover:bg-amaru-gray text-white cursor-pointer active:scale-[0.99]'
+                  : 'bg-slate-200 text-slate-400 dark:bg-[#1E1C1A] dark:text-zinc-600 border border-slate-300 dark:border-[#3E3A36] cursor-not-allowed'
+              }`}
+            >
+              {sincronizando ? (
+                <>
+                  <RotateCw size={16} className="animate-spin text-amaru-copper" />
+                  <span>Sincronizando con Servidor...</span>
+                </>
+              ) : isOnline ? (
+                <>
+                  <RotateCw size={16} />
+                  <span>
+                    {pendientesCount > 0
+                      ? `Sincronizar ${pendientesCount} Pedido(s) con Servidor`
+                      : 'Cola Local Sincronizada'}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <WifiOff size={16} />
+                  <span>Sin Conexión a Red</span>
+                </>
+              )}
+            </button>
+          </div>
+        </section>
+      </div>
+
+      {/* Modal de Registro de Receta Oftalmológica */}
+      <RecetaModal
+        isOpen={mostrarModalReceta}
+        onClose={() => setMostrarModalReceta(false)}
+        initialRut={rutPaciente}
+        onRecetaGuardada={handleRecetaGuardada}
+      />
+
+      {/* Modal de Captura Phygital (Respaldo Sindical) */}
+      <CapturaPhygital
+        isOpen={mostrarPhygital}
+        folio={folioPhygital}
+        onClose={() => setMostrarPhygital(false)}
+        onSuccess={async (folioActualizado) => {
+          setMensajeSync(`✓ Respaldo sindical validado para ${folioActualizado}. Transición a En_Fabricacion.`);
+          await cargarDatosLocales();
+        }}
+      />
+    </>
   );
 };
 
 export default TerminalView;
-

@@ -1,3 +1,9 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-[#F4F5F7] dark:bg-[#1E1C1A] text-[#201E1C] dark:text-[#F5F5F4] antialiased min-h-screen transition-colors duration-200;
+  }
+}

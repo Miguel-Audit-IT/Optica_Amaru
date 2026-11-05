@@ -87,13 +87,3 @@ export async function limpiarSincronizados(): Promise<number> {
     await db.cola_pedidos.bulkDelete(ids as number[]);
     return ids.length;
 }
-
-
-export async function limpiarSincronizados(): Promise<number> {
-    const ids = await db.cola_pedidos
-        .where('estado')
-        .equals('sincronizado')
-        .primaryKeys();
-    await db.cola_pedidos.bulkDelete(ids as number[]);
-    return ids.length;
-}
