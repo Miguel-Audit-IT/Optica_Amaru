@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure-u#8%1c+4qkvm3o)ri+mq@r=9k7&ldmt%zjx&0lzj46^l51g2r9
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
@@ -135,7 +135,9 @@ REST_FRAMEWORK = {
 # Permitir peticiones desde el frontend local de Vite
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
+    "http://localhost:5174",
     "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
 ]
 
 CORS_ALLOW_CREDENTIALS = True

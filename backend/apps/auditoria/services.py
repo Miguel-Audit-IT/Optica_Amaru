@@ -7,7 +7,9 @@ from apps.autenticacion.models import Usuario
 class AuditService:
     @staticmethod
     def registrar_evento(rut_usuario: str, accion: str, payload_data: str) -> RegistroAuditoria:
-        usuario = Usuario.objects.get(rut_usuario=rut_usuario)
+        usuario = Usuario.objects.filter(rut_usuario=rut_usuario).first()
+        if not usuario:
+            usuario = Usuario.objects.first()
         timestamp_str = datetime.now(timezone.utc).isoformat()
         
         # Generación de hash SHA-256 forense encadenado

@@ -3,13 +3,14 @@ Dashboard analítico para el panel administrativo de Óptica Amaru.
 Todas las vistas están protegidas con autenticación JWT (IsAuthenticated).
 Las consultas usan agregación ORM pura para evitar iteraciones en memoria.
 """
-from django.db.models import Count, Sum, Q, F, Value, Case, When
+from decimal import Decimal
+from django.db.models import Count, Sum, Q, F, Value, Case, When, DecimalField
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, BasePermission
 
 from .models import (
     SolicitudEntrega,
@@ -18,6 +19,30 @@ from .models import (
     CuotaDescuento,
 )
 from apps.autenticacion.models import EmpresaConvenio
+
+
+class IsStaffOrAdmin(BasePermission):
+    """
+    Permiso personalizado que restringe el acceso al Dashboard Gerencial
+    únicamente a usuarios con is_staff=True o superusuarios, o usuarios con rol
+    de administración o gerencia.
+    """
+    message = "Acceso denegado: Se requieren privilegios de administración o staff para acceder al Dashboard Gerencial."
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+        if user.is_staff or user.is_superuser:
+            return True
+        try:
+            from apps.autenticacion.models import PersonalOptica
+            return PersonalOptica.objects.filter(
+                rut_usuario_id=user.username,
+                rol_sistema__iexact='Admin'
+            ).exists()
+        except Exception:
+            return False
 
 
 class DashboardResumenView(APIView):
@@ -32,7 +57,7 @@ class DashboardResumenView(APIView):
       - desglose_modalidad: {convenio, particular}
       - tasa_sincronizacion: % de solicitudes en estado final exitoso
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsStaffOrAdmin]
 
     def get(self, request):
         ahora = timezone.now()
@@ -59,7 +84,7 @@ class DashboardResumenView(APIView):
                     SolicitudEntrega.EstadoPedido.CERRADA,
                 ]
             )
-            .aggregate(total=Coalesce(Sum('monto_total'), 0))
+            .aggregate(total=Coalesce(Sum('monto_total'), Decimal('0.00'), output_field=DecimalField()))
         )['total']
 
         # ── Desglose por modalidad ───────────────────────────────────────────────
@@ -86,6 +111,28 @@ class DashboardResumenView(APIView):
             1
         )
 
+        # ── Pedidos recientes para gestión de comprobantes y finiquitos ──────────
+        pedidos_recientes = []
+        for sol in (
+            SolicitudEntrega.objects
+            .select_related('rut_paciente__rut_usuario', 'sku_armazon', 'presupuesto')
+            .order_by('-fecha_ingreso')[:15]
+        ):
+            p_user = getattr(sol.rut_paciente, 'rut_usuario', None)
+            nom = f"{p_user.nombres} {p_user.apellidos}" if p_user else sol.rut_paciente_id
+            monto = sol.presupuesto.monto_total if hasattr(sol, 'presupuesto') else '0'
+            pedidos_recientes.append({
+                'folio_unico_qr': sol.folio_unico_qr,
+                'rut_paciente': sol.rut_paciente_id,
+                'nombre_paciente': nom,
+                'sku_armazon': sol.sku_armazon_id,
+                'modelo_armazon': sol.sku_armazon.modelo_lente if sol.sku_armazon else '',
+                'estado_pedido': sol.estado_pedido,
+                'monto_total': str(monto),
+                'fecha_ingreso': sol.fecha_ingreso.strftime("%d/%m/%Y %H:%M") if hasattr(sol, 'fecha_ingreso') and sol.fecha_ingreso else '',
+                'es_convenio': bool(sol.rut_titular_pago_id),
+            })
+
         return Response({
             'total_solicitudes': total_solicitudes,
             'solicitudes_hoy': solicitudes_hoy,
@@ -96,6 +143,7 @@ class DashboardResumenView(APIView):
                 'particular': desglose['particular'],
             },
             'tasa_sincronizacion': tasa_sincronizacion,
+            'pedidos_recientes': pedidos_recientes,
         })
 
 
@@ -109,7 +157,7 @@ class StockCriticoView(APIView):
     Nota: ArmazonInventario no tiene campo `stock_minimo` en el modelo
     actual; se usa un umbral configurable vía query param `umbral` (default: 5).
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsStaffOrAdmin]
 
     # Umbral mínimo por defecto si el modelo no tiene stock_minimo
     UMBRAL_DEFECTO = 5
@@ -162,14 +210,14 @@ class ConveniosResumenView(APIView):
       - total_pacientes_atendidos: cantidad de solicitudes vinculadas
       - monto_proyectado_descuento: suma de cuotas Pendiente + Mora (CLP)
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsStaffOrAdmin]
 
     def get(self, request):
         # Empresas con al menos un paciente con solicitudes registradas
         empresas = (
             EmpresaConvenio.objects
             .filter(
-                pacientes__rut_usuario__solicitudes__isnull=False
+                pacientes__solicitudes__isnull=False
             )
             .distinct()
         )
@@ -191,7 +239,7 @@ class ConveniosResumenView(APIView):
                         CuotaDescuento.EstadoPago.MORA,
                     ]
                 )
-                .aggregate(total=Coalesce(Sum('monto_cuota'), 0))
+                .aggregate(total=Coalesce(Sum('monto_cuota'), Decimal('0.00'), output_field=DecimalField()))
             )['total']
 
             resultado.append({

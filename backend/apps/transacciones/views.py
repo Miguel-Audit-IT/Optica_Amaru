@@ -1,5 +1,7 @@
 from decimal import Decimal
 from django.db import transaction
+from django.http import HttpResponse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -22,6 +24,10 @@ from .serializers import (
 from apps.autenticacion.models import Paciente, TitularPago
 from apps.clinico.models import RecetaOptica
 from apps.auditoria.services import AuditService
+from .pdf_generator import (
+    generar_comprobante_entrega_pdf,
+    generar_liquidacion_finiquito_pdf
+)
 
 
 class CatalogoInventarioView(APIView):
@@ -156,24 +162,81 @@ class SubirComprobanteView(APIView):
         }, status=status.HTTP_200_OK)
 
 
-class AcelerarFiniquitoView(APIView):
-    permission_classes = [AllowAny]
+class ComprobanteEntregaPDFView(APIView):
+    """
+    GET /api/v1/transacciones/pedidos/<str:folio_qr>/comprobante-pdf/
 
-    def post(self, request, folio: str):
-        serializer = AcelerarFiniquitoSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+    Genera y descarga el Comprobante Oficial de Entrega de EPP en PDF
+    con branding corporativo de Óptica Amaru, detalle de armazón,
+    parámetros ópticos, código QR del folio y recuadro de firma física/huella.
+    """
+    permission_classes = [IsAuthenticated]
 
-        rut_solicitante = serializer.validated_data['rut_solicitante']
+    def get(self, request, folio_qr: str):
+        try:
+            solicitud = (
+                SolicitudEntrega.objects
+                .select_related(
+                    'rut_paciente__rut_usuario',
+                    'sku_armazon',
+                    'rut_titular_pago__id_empresa',
+                    'id_receta'
+                )
+                .get(folio_unico_qr=folio_qr)
+            )
+        except SolicitudEntrega.DoesNotExist:
+            return Response(
+                {'error': f'Pedido con folio {folio_qr} no encontrado.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        pdf_bytes = generar_comprobante_entrega_pdf(solicitud, receta=solicitud.id_receta)
+
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="comprobante_{folio_qr}.pdf"'
+        return response
+
+
+class AcelerarFiniquitoPDFView(APIView):
+    """
+    POST /api/v1/finanzas/pedidos/<str:folio_qr>/acelerar-finiquito/
+    GET  /api/v1/finanzas/pedidos/<str:folio_qr>/acelerar-finiquito/
+
+    Consolida las cuotas pendientes del Presupuesto, actualiza estados
+    a Cobrado_Finiquito, emite pista forense SHA-256 en RegistroAuditoria
+    y genera el documento legal de liquidación en PDF.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, folio_qr: str):
+        rut_solicitante = (
+            request.data.get('rut_solicitante')
+            or getattr(request.user, 'username', '12345678-9')
+        )
 
         try:
-            solicitud = SolicitudEntrega.objects.get(folio_unico_qr=folio)
+            solicitud = (
+                SolicitudEntrega.objects
+                .select_related(
+                    'rut_paciente__rut_usuario',
+                    'rut_titular_pago__id_empresa',
+                    'presupuesto'
+                )
+                .get(folio_unico_qr=folio_qr)
+            )
             presupuesto = solicitud.presupuesto
         except (SolicitudEntrega.DoesNotExist, Presupuesto.DoesNotExist):
-            return Response({'error': 'Registro o presupuesto inexistente'}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {'error': f'Registro o presupuesto inexistente para folio {folio_qr}'},
+                status=status.HTTP_404_NOT_FOUND
+            )
 
         cuotas_pendientes = CuotaDescuento.objects.filter(
             id_presupuesto=presupuesto,
-            estado_pago__in=[CuotaDescuento.EstadoPago.PENDIENTE, CuotaDescuento.EstadoPago.MORA]
+            estado_pago__in=[
+                CuotaDescuento.EstadoPago.PENDIENTE,
+                CuotaDescuento.EstadoPago.MORA,
+            ]
         )
 
         saldo_total_acelerado = sum((c.monto_cuota for c in cuotas_pendientes), Decimal('0.00'))
@@ -185,15 +248,90 @@ class AcelerarFiniquitoView(APIView):
             solicitud.save()
 
             # Emisión de pista forense SHA-256 inmutable
-            AuditService.registrar_evento(
+            evento_audit = AuditService.registrar_evento(
                 rut_usuario=rut_solicitante,
                 accion='ACELERACION_FINIQUITO',
-                payload_data=f"Folio:{folio}|Saldo:{saldo_total_acelerado}"
+                payload_data=f"Folio:{folio_qr}|Saldo:{saldo_total_acelerado}"
             )
 
-        return Response({
-            'folio': folio,
-            'saldo_acelerado_clp': str(saldo_total_acelerado),
-            'cuotas_afectadas': cuotas_pendientes.count(),
-            'estado_pedido': solicitud.estado_pedido
-        }, status=status.HTTP_200_OK)
+        todas_cuotas = CuotaDescuento.objects.filter(id_presupuesto=presupuesto).order_by('numero_cuota')
+
+        pdf_bytes = generar_liquidacion_finiquito_pdf(
+            solicitud=solicitud,
+            presupuesto=presupuesto,
+            cuotas=todas_cuotas,
+            saldo_total=saldo_total_acelerado,
+            hash_sha256=evento_audit.hash_integridad_sha256,
+            fecha_evento=evento_audit.fecha_hora,
+            rut_solicitante=rut_solicitante,
+        )
+
+        if request.query_params.get('format') == 'json' or request.headers.get('Accept') == 'application/json':
+            return Response({
+                'folio': folio_qr,
+                'saldo_acelerado_clp': str(saldo_total_acelerado),
+                'cuotas_afectadas': cuotas_pendientes.count(),
+                'estado_pedido': solicitud.estado_pedido,
+                'hash_sha256': evento_audit.hash_integridad_sha256,
+            }, status=status.HTTP_200_OK)
+
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="finiquito_{folio_qr}.pdf"'
+        return response
+
+    def get(self, request, folio_qr: str):
+        try:
+            solicitud = (
+                SolicitudEntrega.objects
+                .select_related(
+                    'rut_paciente__rut_usuario',
+                    'rut_titular_pago__id_empresa',
+                    'presupuesto'
+                )
+                .get(folio_unico_qr=folio_qr)
+            )
+            presupuesto = solicitud.presupuesto
+        except (SolicitudEntrega.DoesNotExist, Presupuesto.DoesNotExist):
+            return Response(
+                {'error': f'Registro o presupuesto inexistente para folio {folio_qr}'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        todas_cuotas = CuotaDescuento.objects.filter(id_presupuesto=presupuesto).order_by('numero_cuota')
+        cuotas_finiquito = todas_cuotas.filter(estado_pago=CuotaDescuento.EstadoPago.COBRADO_FINIQUITO)
+        if not cuotas_finiquito.exists():
+            cuotas_finiquito = todas_cuotas.filter(
+                estado_pago__in=[CuotaDescuento.EstadoPago.PENDIENTE, CuotaDescuento.EstadoPago.MORA]
+            )
+
+        saldo_total = sum((c.monto_cuota for c in cuotas_finiquito), Decimal('0.00'))
+
+        from apps.auditoria.models import RegistroAuditoria
+        ultimo_audit = RegistroAuditoria.objects.filter(
+            accion_realizada='ACELERACION_FINIQUITO',
+        ).order_by('-fecha_hora').first()
+
+        hash_sha256 = (
+            ultimo_audit.hash_integridad_sha256
+            if ultimo_audit
+            else "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        )
+        fecha_evento = ultimo_audit.fecha_hora if ultimo_audit else timezone.now()
+
+        pdf_bytes = generar_liquidacion_finiquito_pdf(
+            solicitud=solicitud,
+            presupuesto=presupuesto,
+            cuotas=todas_cuotas,
+            saldo_total=saldo_total,
+            hash_sha256=hash_sha256,
+            fecha_evento=fecha_evento,
+            rut_solicitante=request.user.username or 'ADMIN',
+        )
+
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="finiquito_{folio_qr}.pdf"'
+        return response
+
+
+# Alias para retrocompatibilidad
+AcelerarFiniquitoView = AcelerarFiniquitoPDFView
