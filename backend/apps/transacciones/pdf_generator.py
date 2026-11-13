@@ -3,6 +3,8 @@ Generador de documentos PDF corporativos para Óptica Amaru usando ReportLab.
 Incluye comprobantes de entrega de EPP con código QR y reportes legales de aceleración por finiquito.
 """
 import io
+import base64
+import hashlib
 from decimal import Decimal
 from datetime import datetime
 from django.utils import timezone
@@ -57,9 +59,18 @@ def format_clp(monto) -> str:
         return f"${monto} CLP"
 
 
-def generar_comprobante_entrega_pdf(solicitud, receta=None) -> bytes:
+def calcular_sello_integridad_pdf(pdf_bytes: bytes) -> str:
+    """Calcula el hash SHA-256 del documento PDF para sellado de integridad legal (DS 594)."""
+    if not pdf_bytes:
+        return ""
+    return hashlib.sha256(pdf_bytes).hexdigest()
+
+
+def generar_comprobante_entrega_pdf(solicitud, receta=None, firma_b64: str = None) -> bytes:
     """
     Genera el Comprobante Oficial de Entrega de EPP Óptico en PDF.
+    Inyecta la firma electrónica simple del trabajador y prepara el documento
+    para el sellado criptográfico SHA-256.
     """
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -312,12 +323,40 @@ def generar_comprobante_entrega_pdf(solicitud, receta=None) -> bytes:
     story.append(Spacer(1, 12))
 
     # ── Sección 5: Recuadros de Firma y Huella Dactilar ───────────────────────
-    firma_box = [
-        Spacer(1, 40),
+    # Decodificar firma del trabajador (Base64 -> Bytes en memoria)
+    firma_bytes = None
+    b64_a_usar = firma_b64
+    if not b64_a_usar:
+        recepcion = getattr(solicitud, 'recepcion_despacho', None)
+        if recepcion and getattr(recepcion, 'firma_digital_b64', None):
+            b64_a_usar = recepcion.firma_digital_b64
+
+    if b64_a_usar:
+        try:
+            raw_b64 = b64_a_usar.split(',', 1)[1] if ',' in b64_a_usar else b64_a_usar
+            firma_bytes = base64.b64decode(raw_b64.strip())
+        except Exception:
+            firma_bytes = None
+
+    firma_box = []
+    if firma_bytes:
+        try:
+            firma_stream = io.BytesIO(firma_bytes)
+            img_firma = Image(firma_stream, width=130, height=38)
+            img_firma.hAlign = 'CENTER'
+            firma_box.append(img_firma)
+            firma_box.append(Spacer(1, 2))
+        except Exception:
+            firma_box.append(Spacer(1, 40))
+    else:
+        firma_box.append(Spacer(1, 40))
+
+    firma_box.extend([
         Paragraph("________________________________________", ParagraphStyle('FirmaLine', parent=body_style, alignment=1)),
-        Paragraph("<b>FIRMA DEL TRABAJADOR</b>", ParagraphStyle('FirmaL1', parent=body_bold, fontSize=8, alignment=1)),
+        Paragraph("<b>Firma Conforme - Recibo de EPP Óptico</b>", ParagraphStyle('FirmaL1', parent=body_bold, fontSize=8, alignment=1)),
         Paragraph(f"RUT: {rut_paciente}", ParagraphStyle('FirmaL2', parent=body_style, fontSize=7.5, alignment=1)),
-    ]
+        Paragraph("Firma Electrónica Simple (DS 594)", ParagraphStyle('FirmaL3', parent=legal_style, fontSize=6.5, alignment=1)),
+    ])
 
     huella_box = [
         Paragraph("<b>HUELLA DACTILAR</b>", ParagraphStyle('HuellaT', parent=body_bold, fontSize=7, alignment=1)),
@@ -346,10 +385,21 @@ def generar_comprobante_entrega_pdf(solicitud, receta=None) -> bytes:
 
     story.append(KeepTogether(tabla_firmas))
 
-    # Pie de página
-    story.append(Spacer(1, 10))
+    # Pie de página y Sello de Integridad
+    sello_existente = getattr(solicitud, 'sello_integridad_pdf', None)
+    if not sello_existente:
+        recepcion = getattr(solicitud, 'recepcion_despacho', None)
+        if recepcion:
+            sello_existente = getattr(recepcion, 'sello_integridad_pdf', None)
+
+    story.append(Spacer(1, 8))
+    if sello_existente:
+        story.append(Paragraph(
+            f"<b>SELLO DE INTEGRIDAD SHA-256:</b> {sello_existente}",
+            ParagraphStyle('SelloSha', parent=legal_style, alignment=1, fontSize=6.5, textColor=COLOR_NAVY)
+        ))
     story.append(Paragraph(
-        f"Documento generado electrónicamente por Óptica Amaru · {timezone.now().strftime('%d/%m/%Y %H:%M:%S')} · Verificación de Integridad vía QR",
+        f"Documento generado electrónicamente por Óptica Amaru · {timezone.now().strftime('%d/%m/%Y %H:%M:%S')} · Verificación de Integridad y Trazabilidad DS 594",
         ParagraphStyle('Footer', parent=legal_style, alignment=1, fontSize=6.5)
     ))
 

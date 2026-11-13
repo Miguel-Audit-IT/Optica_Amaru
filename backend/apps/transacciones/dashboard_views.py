@@ -21,28 +21,28 @@ from .models import (
 from apps.autenticacion.models import EmpresaConvenio
 
 
-class IsStaffOrAdmin(BasePermission):
+class CanViewDashboard(BasePermission):
     """
-    Permiso personalizado que restringe el acceso al Dashboard Gerencial
-    únicamente a usuarios con is_staff=True o superusuarios, o usuarios con rol
-    de administración o gerencia.
+    Control de Acceso Basado en Roles (RBAC):
+    Restringe los endpoints del Dashboard Gerencial exclusivamente a
+    usuarios del grupo 'Administrador', superusuarios o con el permiso 'autenticacion.ver_dashboard'.
+    Operadores y Auditores recibirán HTTP 403 Forbidden.
     """
-    message = "Acceso denegado: Se requieren privilegios de administración o staff para acceder al Dashboard Gerencial."
+    message = "Acceso denegado: Se requieren permisos de Administrador para acceder al Dashboard Gerencial."
 
     def has_permission(self, request, view):
         user = request.user
         if not (user and user.is_authenticated):
             return False
-        if user.is_staff or user.is_superuser:
-            return True
-        try:
-            from apps.autenticacion.models import PersonalOptica
-            return PersonalOptica.objects.filter(
-                rut_usuario_id=user.username,
-                rol_sistema__iexact='Admin'
-            ).exists()
-        except Exception:
-            return False
+        return (
+            user.is_superuser or
+            user.groups.filter(name__iexact='Administrador').exists() or
+            user.has_perm('autenticacion.ver_dashboard')
+        )
+
+
+# Alias para retrocompatibilidad
+IsStaffOrAdmin = CanViewDashboard
 
 
 class DashboardResumenView(APIView):
@@ -57,7 +57,7 @@ class DashboardResumenView(APIView):
       - desglose_modalidad: {convenio, particular}
       - tasa_sincronizacion: % de solicitudes en estado final exitoso
     """
-    permission_classes = [IsAuthenticated, IsStaffOrAdmin]
+    permission_classes = [IsAuthenticated, CanViewDashboard]
 
     def get(self, request):
         ahora = timezone.now()
@@ -157,7 +157,7 @@ class StockCriticoView(APIView):
     Nota: ArmazonInventario no tiene campo `stock_minimo` en el modelo
     actual; se usa un umbral configurable vía query param `umbral` (default: 5).
     """
-    permission_classes = [IsAuthenticated, IsStaffOrAdmin]
+    permission_classes = [IsAuthenticated, CanViewDashboard]
 
     # Umbral mínimo por defecto si el modelo no tiene stock_minimo
     UMBRAL_DEFECTO = 5
@@ -210,7 +210,7 @@ class ConveniosResumenView(APIView):
       - total_pacientes_atendidos: cantidad de solicitudes vinculadas
       - monto_proyectado_descuento: suma de cuotas Pendiente + Mora (CLP)
     """
-    permission_classes = [IsAuthenticated, IsStaffOrAdmin]
+    permission_classes = [IsAuthenticated, CanViewDashboard]
 
     def get(self, request):
         # Empresas con al menos un paciente con solicitudes registradas

@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { QrCode, ArrowRight, Sun, Moon } from 'lucide-react';
+import { Sun, Moon } from 'lucide-react';
 import logoImg from '../assets/logo.jpg';
 import loginBg from '../assets/login.jpg';
 import { useTheme } from '../hooks/useTheme';
@@ -10,7 +9,6 @@ interface LoginProps {
 }
 
 export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
-    const navigate = useNavigate();
     const { toggleTheme, isDark } = useTheme();
     const [rut, setRut] = useState('');
     const [password, setPassword] = useState('');
@@ -59,7 +57,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
             localStorage.setItem('amaru_session_expires_at', expirationTime.toString());
             localStorage.setItem('amaru_session_active', 'true');
             localStorage.setItem('amaru_is_staff', String(Boolean(data.is_staff)));
-            localStorage.setItem('amaru_rol', data.rol || (data.is_staff ? 'ADMIN' : 'OPERADOR'));
+            localStorage.setItem('amaru_rol', data.rol || (data.is_staff ? 'ADMINISTRADOR' : 'PACIENTE'));
             localStorage.setItem('amaru_username', data.username || rut.trim());
 
             onLoginSuccess();
@@ -118,17 +116,17 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
             <div className="relative z-10 w-full max-w-4xl mx-6 flex flex-col md:flex-row bg-white/70 dark:bg-[#2A2522]/90 backdrop-blur-xl rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(31,38,135,0.15)] border border-white/60 dark:border-white/10 overflow-hidden">
 
                 {/* Panel Izquierdo (Branding) */}
-                <div className="w-full md:w-5/12 bg-gradient-to-br from-white/70 to-white/30 dark:from-[#2A2522]/80 dark:to-[#1A1816]/80 p-8 md:p-10 flex flex-col justify-center items-center border-b md:border-b-0 md:border-r border-white/40 dark:border-white/10">
-                    <div className="bg-white dark:bg-[#1A1816] p-4 rounded-3xl shadow-sm mb-6 transition-transform duration-300 hover:scale-105 border border-slate-100 dark:border-slate-800">
-                        <img src={logoImg} alt="Óptica Amaru" className="h-16 w-auto object-contain rounded-xl" />
+                <div className="w-full md:w-5/12 bg-gradient-to-br from-white/70 to-white/30 dark:from-[#2A2522]/80 dark:to-[#1A1816]/80 p-8 md:p-10 flex flex-col justify-center items-center border-b md:border-b-0 md:border-r border-white/40 dark:border-white/10 text-center">
+                    <div className="bg-white dark:bg-[#1A1816] p-4.5 rounded-3xl shadow-md mb-6 transition-transform duration-300 hover:scale-105 border border-slate-100 dark:border-slate-800">
+                        <img src={logoImg} alt="Óptica Amaru" className="h-20 md:h-24 w-auto object-contain rounded-2xl" />
                     </div>
                     <h2 className="text-2xl font-bold text-[#37322E] dark:text-white tracking-tight mb-2">BIENVENIDO</h2>
-                    <p className="text-[#B34B0C] font-bold tracking-widest text-xs uppercase mb-6">Portal Industrial</p>
+                    <p className="text-[#B34B0C] font-bold tracking-widest text-xs uppercase mb-5">SALUD VISUAL & ÓPTICA</p>
 
-                    <div className="w-12 h-1.5 bg-[#B34B0C] rounded-full mb-6"></div>
+                    <div className="w-12 h-1.5 bg-[#B34B0C] rounded-full mb-5"></div>
 
-                    <p className="text-center text-sm text-slate-700 dark:text-slate-300 font-medium px-4">
-                        Gestión certificada de EPP óptico en terreno minero.
+                    <p className="text-center text-sm text-slate-700 dark:text-slate-300 font-medium px-4 leading-relaxed">
+                        Tu visión, tus recetas y el estado de tus lentes en un solo lugar.
                     </p>
                 </div>
 
@@ -197,71 +195,11 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                         <button
                             type="submit"
                             disabled={loading}
-                            className="w-full mt-1 bg-[#37322E] hover:bg-[#B34B0C] text-white font-bold tracking-wider py-3.5 rounded-full shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all duration-300 cursor-pointer text-sm"
+                            className="w-full mt-2 bg-[#37322E] hover:bg-[#B34B0C] text-white font-bold tracking-wider py-3.5 rounded-full shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all duration-300 cursor-pointer text-sm"
                         >
                             {loading ? 'Autenticando...' : 'Entrar'}
                         </button>
                     </form>
-
-                    {/* Separador — O auto-atención en faena — */}
-                    <div className="relative my-5">
-                        <div className="absolute inset-0 flex items-center">
-                            <div className="w-full border-t border-slate-300/80 dark:border-slate-700"></div>
-                        </div>
-                        <div className="relative flex justify-center text-[11px] uppercase">
-                            <span className="bg-white/80 dark:bg-[#201E1C] px-3 text-slate-500 dark:text-slate-400 font-semibold tracking-wider rounded-full backdrop-blur-xs">
-                                — O auto-atención en faena —
-                            </span>
-                        </div>
-                    </div>
-
-                    {/* Tarjeta interactiva de Auto-Atención en Faena (Acceso QR) */}
-                    <div
-                        onClick={() => navigate('/qr')}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
-                                navigate('/qr');
-                            }
-                        }}
-                        className="group border-2 border-dashed border-[#B34B0C]/40 hover:border-[#B34B0C] bg-orange-50/50 dark:bg-orange-950/20 hover:bg-orange-50/80 dark:hover:bg-orange-950/30 p-3.5 rounded-2xl cursor-pointer transition-all duration-200 shadow-xs hover:shadow-md"
-                    >
-                        <div className="flex items-center gap-3">
-                            <div className="p-2.5 bg-white dark:bg-[#1A1816] rounded-xl shadow-xs border border-orange-200/60 dark:border-orange-900/50 text-[#B34B0C] group-hover:scale-105 transition-transform shrink-0">
-                                <QrCode size={34} className="text-[#B34B0C]" strokeWidth={2.2} />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2">
-                                    <h4 className="text-xs font-bold text-slate-900 dark:text-white group-hover:text-[#B34B0C] transition-colors">
-                                        ¿Eres trabajador sin cuenta?
-                                    </h4>
-                                    <span className="text-[10px] font-mono px-2 py-0.2 rounded-full bg-[#B34B0C]/10 text-[#B34B0C] font-bold">
-                                        QR
-                                    </span>
-                                </div>
-                                <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5 leading-snug">
-                                    Escanea este código o pulsa aquí para solicitar tu lente EPP o agendar evaluación médica con tu RUT.
-                                </p>
-                            </div>
-                        </div>
-
-                        {/* Botón de acceso directo */}
-                        <div className="mt-3">
-                            <button
-                                type="button"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    navigate('/qr');
-                                }}
-                                className="w-full bg-[#B34B0C] hover:bg-[#8F3B09] text-white font-bold py-2.5 px-3 rounded-xl text-xs uppercase tracking-wider transition-all shadow-sm hover:shadow flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99]"
-                            >
-                                <QrCode size={15} />
-                                <span>Ingresar con RUT (Auto-Atención Faena)</span>
-                                <ArrowRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
-                            </button>
-                        </div>
-                    </div>
                 </div>
             </div>
         </div>

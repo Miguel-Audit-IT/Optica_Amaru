@@ -5,14 +5,9 @@ import {
   FilePlus,
   Glasses,
   CheckCircle2,
-  RotateCw,
-  Trash2,
   QrCode,
   Eye,
   AlertTriangle,
-  Clock,
-  WifiOff,
-  Database,
   Building,
   ArrowRight,
   ArrowLeft,
@@ -21,8 +16,8 @@ import {
   CreditCard,
   Camera,
 } from 'lucide-react';
-import { db, type PedidoOfflineQueue, type ArmazonLocal } from '../db/dexie';
-import { sincronizarColaOffline, limpiarSincronizados } from '../sw/syncService';
+import { db, type ArmazonLocal } from '../db/dexie';
+import { sincronizarColaOffline } from '../sw/syncService';
 import { validarRUT, normalizarInputRUT, formatearRUT } from '../utils/rut';
 import { RecetaModal } from '../components/RecetaModal';
 import { CapturaPhygital } from '../components/CapturaPhygital';
@@ -73,23 +68,9 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
   const [mostrarPhygital, setMostrarPhygital] = useState(false);
   const [folioPhygital, setFolioPhygital] = useState('');
 
-  // ── Datos Locales y Cola Dexie ──────────────────────────────────────────────
-  const [colaPendiente, setColaPendiente] = useState<PedidoOfflineQueue[]>([]);
+  // ── Datos Locales y Armazones ──────────────────────────────────────────────
   const [armazonesList, setArmazonesList] = useState<ArmazonLocal[]>([]);
   const [mensajeSync, setMensajeSync] = useState('');
-  const [sincronizando, setSincronizando] = useState(false);
-
-  useEffect(() => {
-    cargarDatosLocales();
-  }, []);
-
-  // Mantener sincronizado rutTitular si es el mismo paciente
-  useEffect(() => {
-    if (esMismoTitular && rutPaciente) {
-      setRutTitular(rutPaciente);
-      setErrorRutTitular('');
-    }
-  }, [esMismoTitular, rutPaciente]);
 
   const cargarDatosLocales = async () => {
     try {
@@ -116,12 +97,14 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
       }
       const armazones = await db.armazones.toArray();
       setArmazonesList(armazones);
-      const cola = await db.cola_pedidos.toArray();
-      setColaPendiente(cola);
     } catch (err) {
       console.error('Error al cargar datos locales de Dexie:', err);
     }
   };
+
+  useEffect(() => {
+    cargarDatosLocales();
+  }, []);
 
   // Validaciones RUT Paciente
   const handleRutPacienteChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -216,6 +199,18 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
       conflicto_msg: null,
     });
 
+    // Notificar al Navbar para actualizar el indicador de nube
+    window.dispatchEvent(new CustomEvent('amaru_sync_updated'));
+
+    // Sincronización transparente en segundo plano si hay red
+    if (isOnline) {
+      sincronizarColaOffline()
+        .then(() => {
+          window.dispatchEvent(new CustomEvent('amaru_sync_updated'));
+        })
+        .catch(() => {});
+    }
+
     // Reset wizard
     setRutPaciente('');
     setNombrePaciente('');
@@ -228,28 +223,7 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
     setCurrentStep(1);
 
     await cargarDatosLocales();
-    setMensajeSync(`✓ Folio ${nuevoFolio} registrado y encolado en base local.`);
-  };
-
-  // Sincronización y Limpieza de Cola
-  const handleSincronizar = async () => {
-    setSincronizando(true);
-    setMensajeSync('Sincronizando cola con el servidor Django...');
-    try {
-      const res = await sincronizarColaOffline();
-      setMensajeSync(`Completado: ${res.procesados.length} procesados, ${res.conflictos.length} conflictos.`);
-      await cargarDatosLocales();
-    } catch (err) {
-      setMensajeSync(`Fallo: ${err instanceof Error ? err.message : 'Error desconocido'}`);
-    } finally {
-      setSincronizando(false);
-    }
-  };
-
-  const handleLimpiarSincronizados = async () => {
-    const n = await limpiarSincronizados();
-    setMensajeSync(`${n} registro(s) sincronizado(s) eliminados de la cola local.`);
-    await cargarDatosLocales();
+    setMensajeSync(`✓ Atención registrada con éxito (Folio: ${nuevoFolio}). Guardado seguro.`);
   };
 
   const handleRecetaGuardada = (receta: RecetaOpticaItem) => {
@@ -258,50 +232,20 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
     setMensajeSync(`✓ Receta ${receta.id_receta.slice(0, 8)} asociada con vigencia confirmada.`);
   };
 
-  const BadgeEstado = ({ item }: { item: PedidoOfflineQueue }) => {
-    if (item.estado === 'sincronizado') {
-      return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800">
-          <CheckCircle2 size={11} /> Sincronizado
-        </span>
-      );
-    }
-    if (item.estado === 'conflicto') {
-      return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-800 dark:bg-red-950/80 dark:text-red-400 border border-red-300 dark:border-red-800">
-          <AlertTriangle size={11} /> Conflicto
-        </span>
-      );
-    }
-    return (
-      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-400 border border-amber-300 dark:border-amber-800">
-        <Clock size={11} /> En Cola
-      </span>
-    );
-  };
-
-  const pendientesCount = colaPendiente.filter((p) => p.estado === 'en_cola').length;
-
   return (
     <>
       {/* ── Header del Módulo ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-amaru-copper/10 dark:bg-amaru-copper/20 text-amaru-copper rounded-2xl border border-amaru-copper/20 shadow-xs">
-            <ShieldCheck size={26} className="text-amaru-copper" />
+          <div className="p-2.5 bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 rounded-2xl border border-blue-500/20 shadow-xs">
+            <ShieldCheck size={26} />
           </div>
           <div>
-            <div className="flex items-center gap-2.5">
-              <h2 className="text-xl font-bold tracking-tight text-[#201E1C] dark:text-white">
-                Terminal Asistido de Captura (Wizard)
-              </h2>
-              <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-full text-[11px] font-semibold">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                Terminal Offline Activo
-              </div>
-            </div>
+            <h2 className="text-xl font-bold tracking-tight text-[#201E1C] dark:text-white">
+              Nueva Atención · Registro de Paciente
+            </h2>
             <p className="text-xs text-[#6C6A68] dark:text-amaru-light-gray mt-0.5">
-              Flujo guiado en 3 pasos con validación biométrica, embudo clínico y cotización
+              Flujo guiado para pacientes particulares y convenios con validación clínica y cotización
             </p>
           </div>
         </div>
@@ -330,9 +274,25 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* ── Asistente por Pasos (Wizard - Izquierda) ── */}
-        <section className="lg:col-span-7 bg-white dark:bg-amaru-surface-dark border border-slate-200 dark:border-[#3E3A36] p-6 rounded-2xl shadow-sm dark:shadow-xl transition-all">
+      {mensajeSync && (
+        <div className="max-w-4xl mx-auto mb-5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs rounded-xl p-3.5 flex items-center justify-between shadow-xs animate-in fade-in duration-200">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
+            <span className="font-semibold">{mensajeSync}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setMensajeSync('')}
+            className="text-emerald-600 dark:text-emerald-400 font-bold hover:underline cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      <div className="w-full max-w-4xl mx-auto">
+        {/* ── Asistente por Pasos (Wizard) ── */}
+        <section className="w-full bg-white dark:bg-amaru-surface-dark border border-slate-200 dark:border-[#3E3A36] p-6 sm:p-8 rounded-2xl shadow-sm dark:shadow-xl transition-all">
           {/* Barra de Progreso del Asistente */}
           <div className="mb-6 pb-4 border-b border-slate-100 dark:border-[#3E3A36]">
             <div className="flex items-center justify-between">
@@ -903,160 +863,11 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
                   }`}
                 >
                   <QrCode size={17} />
-                  <span>Generar Folio y Guardar en Local</span>
+                  <span>Completar Atención y Generar Folio</span>
                 </button>
               </div>
             </form>
           )}
-        </section>
-
-        {/* ── Cola FIFO Offline Dexie.js (Derecha) ── */}
-        <section className="lg:col-span-5 bg-white dark:bg-amaru-surface-dark border border-slate-200 dark:border-[#3E3A36] p-6 rounded-2xl shadow-sm dark:shadow-xl flex flex-col justify-between transition-all">
-          <div>
-            <div className="flex justify-between items-center pb-4 mb-4 border-b border-slate-100 dark:border-[#3E3A36]">
-              <div>
-                <h3 className="text-sm font-bold uppercase tracking-wider text-[#201E1C] dark:text-white flex items-center gap-2">
-                  <Database size={18} className="text-amaru-copper" />
-                  Cola FIFO Offline
-                </h3>
-                <p className="text-xs text-[#6C6A68] dark:text-amaru-light-gray mt-0.5">
-                  IndexedDB reactiva en dispositivo
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs bg-amaru-copper/10 text-amaru-copper dark:text-amber-400 border border-amaru-copper/20 px-2.5 py-1 rounded-full font-bold">
-                  {pendientesCount} pendientes
-                </span>
-                {colaPendiente.some((p) => p.sincronizado) && (
-                  <button
-                    onClick={handleLimpiarSincronizados}
-                    title="Limpiar pedidos ya sincronizados"
-                    className="p-1.5 rounded-lg text-[#6C6A68] hover:text-red-600 dark:text-zinc-400 dark:hover:text-red-400 border border-slate-200 dark:border-[#3E3A36] hover:border-red-300 transition-colors cursor-pointer"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Listado de Solicitudes en Cola */}
-            <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
-              {colaPendiente.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
-                  <div className="p-3.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-2xl mb-3 border border-emerald-500/20">
-                    <CheckCircle2 size={36} />
-                  </div>
-                  <h4 className="text-sm font-bold text-[#201E1C] dark:text-white mb-1">
-                    Cola local al día
-                  </h4>
-                  <p className="text-xs text-[#6C6A68] dark:text-amaru-light-gray max-w-xs leading-relaxed">
-                    No hay solicitudes pendientes en el almacenamiento local. Todas las capturas previas han sido conciliadas con el servidor.
-                  </p>
-                </div>
-              ) : (
-                colaPendiente.map((item) => (
-                  <div
-                    key={item.folio_unico_qr}
-                    className="bg-slate-50 dark:bg-[#1E1C1A] border border-slate-200 dark:border-[#3E3A36] p-3.5 rounded-xl text-xs space-y-2 hover:border-amaru-copper/40 transition-colors shadow-xs"
-                  >
-                    <div className="flex justify-between items-start">
-                      <div className="flex items-center gap-1.5 font-mono text-amaru-copper font-bold tracking-wide">
-                        <QrCode size={13} />
-                        <span>{item.folio_unico_qr}</span>
-                      </div>
-                      <BadgeEstado item={item} />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-[11px] text-[#524944] dark:text-zinc-300">
-                      <div>
-                        <span className="text-[#6C6A68] dark:text-amaru-light-gray">Paciente: </span>
-                        <span className="font-semibold">{item.rut_paciente}</span>
-                      </div>
-                      <div>
-                        <span className="text-[#6C6A68] dark:text-amaru-light-gray">Armazón: </span>
-                        <span className="font-semibold font-mono">{item.sku_armazon}</span>
-                      </div>
-                      <div>
-                        <span className="text-[#6C6A68] dark:text-amaru-light-gray">Total: </span>
-                        <span className="font-bold text-[#201E1C] dark:text-white">
-                          ${Number(item.monto_total).toLocaleString('es-CL')}
-                        </span>
-                      </div>
-                      {item.cuotas && item.cuotas.length > 0 && (
-                        <div>
-                          <span className="text-[#6C6A68] dark:text-amaru-light-gray">Cuotas: </span>
-                          <span className="font-semibold text-amaru-copper">
-                            {item.cuotas.length}x ${Math.round(Number(item.monto_total) / item.cuotas.length).toLocaleString('es-CL')}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    {item.estado === 'conflicto' && item.conflicto_msg && (
-                      <div className="p-2 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-red-700 dark:text-red-300 text-[11px] flex items-start gap-1.5">
-                        <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-                        <span>Conflicto: {item.conflicto_msg}</span>
-                      </div>
-                    )}
-
-                    {/* Botón rápido para subir respaldo Phygital si es convenio */}
-                    {item.cuotas && item.cuotas.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFolioPhygital(item.folio_unico_qr);
-                          setMostrarPhygital(true);
-                        }}
-                        className="mt-2 w-full py-1.5 px-2.5 bg-amaru-copper/10 hover:bg-amaru-copper text-amaru-copper hover:text-white border border-amaru-copper/30 rounded-lg text-[11px] font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                      >
-                        <Camera size={13} />
-                        <span>Subir Respaldo Sindical (Phygital)</span>
-                      </button>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Footer de Sincronización */}
-          <div className="mt-5 pt-4 border-t border-slate-200 dark:border-[#3E3A36]">
-            {mensajeSync && (
-              <p className="text-xs text-[#524944] dark:text-amaru-light-gray mb-3 font-mono flex items-center gap-1.5">
-                <span className="text-amaru-copper">●</span> {mensajeSync}
-              </p>
-            )}
-            <button
-              onClick={handleSincronizar}
-              disabled={!isOnline || sincronizando || pendientesCount === 0}
-              className={`w-full py-3 rounded-xl text-sm font-semibold transition-all duration-200 flex items-center justify-center gap-2 shadow-sm ${
-                isOnline && pendientesCount > 0
-                  ? 'bg-amaru-dark hover:bg-amaru-gray text-white cursor-pointer active:scale-[0.99]'
-                  : 'bg-slate-200 text-slate-400 dark:bg-[#1E1C1A] dark:text-zinc-600 border border-slate-300 dark:border-[#3E3A36] cursor-not-allowed'
-              }`}
-            >
-              {sincronizando ? (
-                <>
-                  <RotateCw size={16} className="animate-spin text-amaru-copper" />
-                  <span>Sincronizando con Servidor...</span>
-                </>
-              ) : isOnline ? (
-                <>
-                  <RotateCw size={16} />
-                  <span>
-                    {pendientesCount > 0
-                      ? `Sincronizar ${pendientesCount} Pedido(s) con Servidor`
-                      : 'Cola Local Sincronizada'}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <WifiOff size={16} />
-                  <span>Sin Conexión a Red</span>
-                </>
-              )}
-            </button>
-          </div>
         </section>
       </div>
 

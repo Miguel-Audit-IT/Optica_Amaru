@@ -41,6 +41,16 @@ DROP FUNCTION IF EXISTS bloquear_mutacion_auditoria();
 """
 
 
+def aplicar_triggers(apps, schema_editor):
+    if schema_editor.connection.vendor == 'postgresql':
+        schema_editor.execute(TRIGGER_STOCK_SQL + TRIGGER_AUDITORIA_SQL)
+
+
+def revertir_triggers(apps, schema_editor):
+    if schema_editor.connection.vendor == 'postgresql':
+        schema_editor.execute(REVERSE_SQL)
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -49,8 +59,8 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunSQL(
-            sql=TRIGGER_STOCK_SQL + TRIGGER_AUDITORIA_SQL,
-            reverse_sql=REVERSE_SQL
+        migrations.RunPython(
+            aplicar_triggers,
+            revertir_triggers
         )
     ]

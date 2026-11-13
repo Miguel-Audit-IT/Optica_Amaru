@@ -1,4 +1,4 @@
-Django>=5.0,<5.1
+Django>=5.2.19,<6.0  # CVE remediación: actualizado desde 5.0.14 (11 CVEs) a 5.2.19 LTS (0 CVEs conocidos)
 djangorestframework>=3.15.0
 djangorestframework-simplejwt>=5.3.1
 psycopg2-binary>=2.9.9

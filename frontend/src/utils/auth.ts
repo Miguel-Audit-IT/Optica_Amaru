@@ -29,6 +29,30 @@ export function decodeJwtPayload(token: string): JwtCustomClaims | null {
 }
 
 /**
+ * Retorna true ÚNICAMENTE si el usuario actual posee rol de Administrador.
+ * Operadores y Auditores retornan false.
+ */
+export function isUserAdmin(): boolean {
+  // 1. Chequeo directo en localStorage
+  const rol = (localStorage.getItem('amaru_rol') || '').toUpperCase();
+  if (rol === 'ADMINISTRADOR' || rol === 'ADMIN') {
+    return true;
+  }
+
+  // 2. Decodificación de respaldo desde el token de acceso JWT
+  const token = localStorage.getItem('amaru_access_token');
+  if (token) {
+    const payload = decodeJwtPayload(token);
+    const tokenRol = (payload?.rol || '').toUpperCase();
+    if (tokenRol === 'ADMINISTRADOR' || tokenRol === 'ADMIN') {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * Retorna true si el usuario actual posee permisos de staff o rol administrativo/gerencial.
  */
 export function isUserStaffOrAdmin(): boolean {
@@ -57,19 +81,41 @@ export function isUserStaffOrAdmin(): boolean {
   return false;
 }
 
-export function getUserInfo(): { username: string; is_staff: boolean; rol: string } {
+export function isUserPatient(): boolean {
+  const { rol } = getUserInfo();
+  return rol === 'PACIENTE';
+}
+
+export function getUserInfo(): { username: string; rut: string; is_staff: boolean; rol: string } {
   const token = localStorage.getItem('amaru_access_token');
   const payload = token ? decodeJwtPayload(token) : null;
 
   const is_staff =
     localStorage.getItem('amaru_is_staff') === 'true' || Boolean(payload?.is_staff);
-  const rol =
+
+  const rawRol = (
     localStorage.getItem('amaru_rol') ||
     payload?.rol ||
-    (is_staff ? 'ADMIN' : 'OPERADOR');
+    ''
+  ).toUpperCase();
+
+  let rol = 'PACIENTE';
+  if (rawRol.includes('ADMIN')) {
+    rol = 'ADMINISTRADOR';
+  } else if (rawRol.includes('AUDIT')) {
+    rol = 'AUDITOR';
+  } else if (rawRol.includes('OPER')) {
+    rol = 'OPERADOR';
+  } else if (rawRol.includes('PACIENTE')) {
+    rol = 'PACIENTE';
+  } else if (is_staff) {
+    rol = 'ADMINISTRADOR';
+  }
+
   const username =
     localStorage.getItem('amaru_username') || payload?.username || '';
+  const rut = username;
 
-  return { username, is_staff, rol };
+  return { username, rut, is_staff, rol };
 }
 

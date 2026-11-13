@@ -18,6 +18,7 @@ export interface ConfirmarDespachoPayload {
   rut_receptor: string;
   codigo_pdf417?: string;
   hash_codigo?: string;
+  firma_trabajador_b64?: string;
 }
 
 export interface ConfirmarDespachoResponse {
@@ -27,6 +28,7 @@ export interface ConfirmarDespachoResponse {
   tipo_receptor: string;
   rut_receptor: string;
   estado: string;
+  sello_integridad_pdf?: string;
   simulado?: boolean;
 }
 
@@ -41,6 +43,7 @@ export async function confirmarDespacho(payload: ConfirmarDespachoPayload): Prom
         rut_receptor: payload.rut_receptor,
         codigo_barras_pdf417_leido: payload.codigo_pdf417 || payload.hash_codigo || 'PDF417_AUTENTICADO',
         hash_codigo: payload.hash_codigo || payload.codigo_pdf417,
+        firma_trabajador_b64: payload.firma_trabajador_b64,
       }),
     });
 

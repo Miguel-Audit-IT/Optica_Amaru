@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
+import SignatureCanvas from 'react-signature-canvas';
 import {
   Truck,
   Search,
@@ -12,6 +13,10 @@ import {
   RotateCcw,
   Sparkles,
   QrCode,
+  PenTool,
+  Eraser,
+  FileText,
+  Lock,
 } from 'lucide-react';
 import { validarRUT, normalizarInputRUT, formatearRUT } from '../utils/rut';
 import { confirmarDespacho, type ConfirmarDespachoResponse } from '../services/despachoService';
@@ -28,9 +33,13 @@ export const EntregaView: React.FC<EntregaViewProps> = ({ isOnline }) => {
   const [errorRutReceptor, setErrorRutReceptor] = useState('');
   const [codigoPdf417, setCodigoPdf417] = useState('');
   const [escanExitoso, setEscanExitoso] = useState(false);
+  const [tieneFirma, setTieneFirma] = useState(false);
+  const [errorFirma, setErrorFirma] = useState('');
   const [guardando, setGuardando] = useState(false);
   const [errorEnvio, setErrorEnvio] = useState<string | null>(null);
   const [resultado, setResultado] = useState<ConfirmarDespachoResponse | null>(null);
+
+  const sigPadRef = useRef<SignatureCanvas | null>(null);
 
   // Manejo de cambio en el RUT del receptor
   const handleRutChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -65,25 +74,47 @@ export const EntregaView: React.FC<EntregaViewProps> = ({ isOnline }) => {
     setEscanExitoso(false);
   };
 
+  const handleLimpiarFirma = () => {
+    sigPadRef.current?.clear();
+    setTieneFirma(false);
+    setErrorFirma('');
+  };
+
+  const handleEndDrawing = () => {
+    if (sigPadRef.current && !sigPadRef.current.isEmpty()) {
+      setTieneFirma(true);
+      setErrorFirma('');
+    }
+  };
+
   const formularioValido =
     folio.trim().length >= 4 &&
     rutReceptor.trim().length >= 8 &&
     validarRUT(rutReceptor) &&
-    escanExitoso;
+    escanExitoso &&
+    tieneFirma;
 
   const handleConfirmar = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!sigPadRef.current || sigPadRef.current.isEmpty()) {
+      setErrorFirma('Debe registrar la firma del trabajador/receptor (DS 594).');
+      return;
+    }
     if (!formularioValido || guardando) return;
 
     setGuardando(true);
     setErrorEnvio(null);
 
     try {
+      // Capturar trazo en formato de imagen Base64 (PNG transparente)
+      const firmaB64 = sigPadRef.current.getTrimmedCanvas().toDataURL('image/png');
+
       const res = await confirmarDespacho({
         folio: folio.trim().toUpperCase(),
         tipo_receptor: tipoReceptor,
         rut_receptor: formatearRUT(rutReceptor),
         codigo_pdf417: codigoPdf417 || 'PDF417_AUTENTICADO_MANUAL',
+        firma_trabajador_b64: firmaB64,
       });
       setResultado(res);
     } catch (err) {
@@ -102,6 +133,9 @@ export const EntregaView: React.FC<EntregaViewProps> = ({ isOnline }) => {
     setEscanExitoso(false);
     setResultado(null);
     setErrorEnvio(null);
+    sigPadRef.current?.clear();
+    setTieneFirma(false);
+    setErrorFirma('');
   };
 
   return (
@@ -168,22 +202,47 @@ export const EntregaView: React.FC<EntregaViewProps> = ({ isOnline }) => {
                 {resultado.estado || 'Entregada'}
               </p>
             </div>
+            {resultado.sello_integridad_pdf && (
+              <div className="col-span-2 bg-white dark:bg-[#1E1C1A] border border-slate-200 dark:border-[#3E3A36] rounded-lg p-2.5 space-y-1">
+                <div className="flex items-center justify-between text-[11px] text-[#6C6A68] dark:text-amaru-light-gray">
+                  <span className="font-semibold flex items-center gap-1 text-slate-800 dark:text-slate-200">
+                    <Lock size={12} className="text-emerald-500" /> Sello Criptográfico SHA-256 (DS 594):
+                  </span>
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">Inmutable</span>
+                </div>
+                <p className="font-mono text-[10px] text-slate-600 dark:text-slate-300 break-all select-all">
+                  {resultado.sello_integridad_pdf}
+                </p>
+              </div>
+            )}
           </div>
 
-          <button
-            type="button"
-            onClick={handleNuevoDespacho}
-            className="w-full bg-gradient-to-r from-amaru-copper to-amaru-earth hover:from-amaru-earth hover:to-amaru-copper text-white font-semibold py-3 px-6 rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
-          >
-            <RotateCcw size={16} />
-            <span>Procesar Siguiente Despacho</span>
-          </button>
+          <div className="flex flex-col sm:flex-row gap-3 pt-2">
+            <a
+              href={`http://127.0.0.1:8000/api/v1/transacciones/pedidos/${resultado.folio}/comprobante-pdf/`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 bg-white hover:bg-slate-50 dark:bg-zinc-800 dark:hover:bg-zinc-700 border border-slate-300 dark:border-zinc-600 text-slate-800 dark:text-white font-semibold py-3 px-4 rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 text-xs"
+            >
+              <FileText size={16} className="text-amaru-copper" />
+              <span>Ver Comprobante PDF Sellado</span>
+            </a>
+
+            <button
+              type="button"
+              onClick={handleNuevoDespacho}
+              className="flex-1 bg-gradient-to-r from-amaru-copper to-amaru-earth hover:from-amaru-earth hover:to-amaru-copper text-white font-semibold py-3 px-4 rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-2 text-xs"
+            >
+              <RotateCcw size={16} />
+              <span>Procesar Siguiente Despacho</span>
+            </button>
+          </div>
         </div>
       ) : (
         /* ── Formulario de Entrega y Validación ── */
         <form onSubmit={handleConfirmar} className="grid grid-cols-1 lg:grid-cols-12 gap-6" noValidate>
           {/* Columna Izquierda: Folio y Receptor */}
-          <div className="lg:col-span-6 space-y-5 bg-white dark:bg-amaru-surface-dark border border-slate-200 dark:border-[#3E3A36] p-6 rounded-2xl shadow-sm dark:shadow-xl transition-all">
+          <div className="lg:col-span-6 space-y-5 card-zenith p-6 rounded-2xl transition-all">
             <div className="pb-3 border-b border-slate-100 dark:border-[#3E3A36]">
               <h3 className="text-sm font-bold uppercase tracking-wider text-amaru-copper flex items-center gap-2">
                 <Search size={18} />
@@ -230,7 +289,7 @@ export const EntregaView: React.FC<EntregaViewProps> = ({ isOnline }) => {
                 >
                   <div className="flex items-center gap-2">
                     <UserCheck size={18} />
-                    <span>Titular / Trabajador</span>
+                    <span>Paciente / Titular</span>
                   </div>
                   {tipoReceptor === 'Titular' && <CheckCircle2 size={16} />}
                 </button>
@@ -295,9 +354,9 @@ export const EntregaView: React.FC<EntregaViewProps> = ({ isOnline }) => {
           </div>
 
           {/* Columna Derecha: Área de Escaneo PDF417 y Confirmación */}
-          <div className="lg:col-span-6 space-y-5 bg-white dark:bg-amaru-surface-dark border border-slate-200 dark:border-[#3E3A36] p-6 rounded-2xl shadow-sm dark:shadow-xl flex flex-col justify-between transition-all">
+          <div className="lg:col-span-6 space-y-5 card-zenith p-6 rounded-2xl flex flex-col justify-between transition-all">
             <div className="space-y-4">
-              <div className="pb-3 border-b border-slate-100 dark:border-[#3E3A36]">
+              <div className="pb-3 border-b border-slate-100 dark:border-white/10">
                 <h3 className="text-sm font-bold uppercase tracking-wider text-amaru-copper flex items-center gap-2">
                   <CreditCard size={18} />
                   Validación Legal (No Repudio)
@@ -308,7 +367,7 @@ export const EntregaView: React.FC<EntregaViewProps> = ({ isOnline }) => {
               </div>
 
               {/* Área de Escaneo PDF417 con borde punteado */}
-              <div className="border-dashed border-2 border-slate-300 dark:border-amaru-gray bg-white dark:bg-amaru-surface-dark rounded-2xl p-6 text-center space-y-3 transition-colors">
+              <div className="border-dashed border-2 border-slate-300 dark:border-white/15 bg-slate-50/50 dark:bg-black/20 rounded-2xl p-6 text-center space-y-3 transition-colors">
                 <div
                   className={`inline-flex p-3 rounded-2xl transition-colors ${
                     escanExitoso
@@ -349,12 +408,92 @@ export const EntregaView: React.FC<EntregaViewProps> = ({ isOnline }) => {
                   <button
                     type="button"
                     onClick={handleSimularEscanerPDF417}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-white bg-amaru-copper hover:bg-amaru-earth px-4 py-2.5 rounded-xl transition-all shadow-sm cursor-pointer active:scale-95"
+                    className="btn-copper inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2.5 rounded-xl transition-all cursor-pointer"
                   >
                     <Sparkles size={14} />
                     <span>Escanear Cédula de Identidad</span>
                   </button>
                 </div>
+              </div>
+
+              {/* ── Lienzo de Firma Electrónica Simple (DS 594) — Instrumento de Precisión ── */}
+              <div className="bg-slate-50/80 dark:bg-black/30 border border-slate-300 dark:border-white/10 rounded-2xl p-4 space-y-3 relative overflow-hidden">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-amaru-copper/10 text-amaru-copper rounded-lg">
+                      <PenTool size={16} />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-[#201E1C] dark:text-white flex items-center gap-1.5 font-mono">
+                        FIRMA CONFORME · PACIENTE / TITULAR
+                        <span className="text-amaru-copper">*</span>
+                      </h4>
+                      <p className="text-[11px] text-[#6C6A68] dark:text-amaru-light-gray">
+                        Acreditación de entrega presencial para fiscalización DT o resguardo clínico
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {tieneFirma && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 rounded-full text-[11px] font-mono font-semibold">
+                        <CheckCircle2 size={12} />
+                        REGISTRADA
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleLimpiarFirma}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-slate-700 dark:text-slate-200 bg-white dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 border border-slate-300 dark:border-zinc-600 rounded-lg transition-colors cursor-pointer"
+                      title="Limpiar trazo"
+                    >
+                      <Eraser size={13} />
+                      <span>Limpiar</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Lienzo de firma: Calibrado óptico con marcas de precisión y guías */}
+                <div className="relative bg-white border-2 border-slate-300 dark:border-white/20 rounded-xl overflow-hidden shadow-inner">
+                  {/* Marcas de precisión en esquinas (Crosshairs) */}
+                  <span className="absolute top-1 left-2 text-[10px] font-mono text-slate-300 select-none pointer-events-none">+</span>
+                  <span className="absolute top-1 right-2 text-[10px] font-mono text-slate-300 select-none pointer-events-none">+</span>
+                  <span className="absolute bottom-1 left-2 text-[10px] font-mono text-slate-300 select-none pointer-events-none">+</span>
+                  <span className="absolute bottom-1 right-2 text-[10px] font-mono text-slate-300 select-none pointer-events-none">+</span>
+
+                  {/* Línea guía de firma industrial */}
+                  <div className="absolute bottom-6 left-6 right-6 border-b border-dashed border-slate-300 pointer-events-none" />
+                  <span className="absolute bottom-1.5 right-6 text-[9px] font-mono text-slate-400 select-none pointer-events-none uppercase">
+                    LÍNEA BASE DE FIRMA DIGITAL
+                  </span>
+
+                  <SignatureCanvas
+                    ref={sigPadRef}
+                    onEnd={handleEndDrawing}
+                    canvasProps={{
+                      className: 'w-full h-32 cursor-crosshair touch-none bg-white',
+                    }}
+                    penColor="#0F172A"
+                    minWidth={1.2}
+                    maxWidth={2.8}
+                  />
+                  {!tieneFirma && (
+                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-slate-400 text-xs italic select-none">
+                      Dibuje aquí la firma con el dedo o puntero
+                    </div>
+                  )}
+                </div>
+
+                {/* Subtexto de calibración técnica */}
+                <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 dark:text-zinc-500 pt-0.5">
+                  <span>RESOLUCIÓN: VECTORIAL 2D TOUCH</span>
+                  <span>ESTÁNDAR: LEY N° 19.799</span>
+                </div>
+
+                {errorFirma && (
+                  <p className="text-red-500 text-[11px] font-medium flex items-center gap-1">
+                    <AlertTriangle size={12} /> {errorFirma}
+                  </p>
+                )}
               </div>
 
               {errorEnvio && (
@@ -366,14 +505,14 @@ export const EntregaView: React.FC<EntregaViewProps> = ({ isOnline }) => {
             </div>
 
             {/* Acción Final: Botón Confirmar Entrega y Descontar Stock */}
-            <div className="pt-4 border-t border-slate-100 dark:border-[#3E3A36]">
+            <div className="pt-4 border-t border-slate-100 dark:border-white/10">
               <button
                 type="submit"
                 disabled={!formularioValido || guardando}
                 className={`w-full py-3.5 rounded-xl text-sm font-semibold transition-all duration-200 flex items-center justify-center gap-2 shadow-md ${
                   formularioValido && !guardando
-                    ? 'bg-amaru-copper hover:bg-amaru-earth text-white shadow-amaru-copper/20 cursor-pointer active:scale-[0.99]'
-                    : 'bg-slate-200 text-slate-400 dark:bg-[#1E1C1A] dark:text-zinc-600 border border-slate-300 dark:border-amaru-gray cursor-not-allowed shadow-none'
+                    ? 'btn-copper cursor-pointer'
+                    : 'bg-slate-200 text-slate-400 dark:bg-white/[0.04] dark:text-zinc-600 border border-slate-300 dark:border-white/10 cursor-not-allowed shadow-none'
                 }`}
               >
                 <CheckCircle2 size={18} />

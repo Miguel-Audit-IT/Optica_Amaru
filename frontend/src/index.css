@@ -3,7 +3,209 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --bg-light: #F7F6F3;
+    --bg-dark: #0E0D0C;
+    --grid-dot-light: rgba(179, 75, 12, 0.07);
+    --grid-dot-dark: rgba(255, 255, 255, 0.05);
+    --copper-primary: #B34B0C;
+    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  html {
+    color-scheme: light dark;
+  }
+
   body {
-    @apply bg-[#F4F5F7] dark:bg-[#1E1C1A] text-[#201E1C] dark:text-[#F5F5F4] antialiased min-h-screen transition-colors duration-200;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    min-height: 100vh;
+    transition: background-color 0.2s ease, color 0.2s ease;
+    background-color: var(--bg-light);
+    background-image: radial-gradient(var(--grid-dot-light) 1px, transparent 1px);
+    background-size: 24px 24px;
+    color: #1F1D1A;
+  }
+
+  .dark body,
+  html.dark body {
+    background-color: var(--bg-dark);
+    background-image: radial-gradient(var(--grid-dot-dark) 1px, transparent 1px);
+    background-size: 24px 24px;
+    color: #F7F6F3;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+    letter-spacing: -0.025em;
+    font-weight: 700;
+  }
+
+  /* Números tabulares para folios, RUTs, cifras monetarias y tablas */
+  table, th, td, .tabular-nums, .font-mono, [data-tabular] {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@keyframes opticalFadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes timelineFill {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@layer components {
+  /* ── Motor de Animaciones Ópticas y Cascadas Escalonadas ── */
+  .animate-stagger-1 {
+    animation: opticalFadeInUp 0.65s cubic-bezier(0.16, 1, 0.3, 1) 50ms both;
+  }
+  .animate-stagger-2 {
+    animation: opticalFadeInUp 0.65s cubic-bezier(0.16, 1, 0.3, 1) 120ms both;
+  }
+  .animate-stagger-3 {
+    animation: opticalFadeInUp 0.65s cubic-bezier(0.16, 1, 0.3, 1) 190ms both;
+  }
+  .animate-stagger-4 {
+    animation: opticalFadeInUp 0.65s cubic-bezier(0.16, 1, 0.3, 1) 260ms both;
+  }
+
+  /* Reflejo de cristal óptico antirreflejo (Optical Sheen) */
+  .optical-sheen {
+    position: relative;
+    overflow: hidden;
+  }
+  .optical-sheen::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -160%;
+    width: 80%;
+    height: 100%;
+    background: linear-gradient(120deg, transparent 25%, rgba(255, 255, 255, 0.45) 50%, transparent 75%);
+    pointer-events: none;
+    transform: skewX(-22deg);
+    transition: none;
+    z-index: 20;
+  }
+  .dark .optical-sheen::after {
+    background: linear-gradient(120deg, transparent 25%, rgba(255, 255, 255, 0.14) 50%, transparent 75%);
+  }
+  .optical-sheen:hover::after {
+    left: 200%;
+    transition: left 0.75s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* Llenado progresivo de líneas del Stepper */
+  .timeline-line-fill {
+    transform-origin: top;
+    animation: timelineFill 0.75s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* Tarjetas con efecto de luz cenital (Zenith Light) y borde de precisión */
+  .card-zenith {
+    background-color: #FFFFFF;
+    border: 1px solid rgba(226, 232, 240, 0.85);
+    box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.7), 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.03);
+    transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .dark .card-zenith {
+    background-color: #141210;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.06), 0 1px 3px 0 rgba(0, 0, 0, 0.4);
+    transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .card-zenith:hover {
+    box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.9), 0 6px 18px 0 rgba(0, 0, 0, 0.06);
+  }
+  .dark .card-zenith:hover {
+    box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.1), 0 8px 24px 0 rgba(0, 0, 0, 0.55);
+  }
+
+  /* Botón con degradado táctil cobrizo */
+  .btn-copper {
+    background-image: linear-gradient(180deg, #C85A17 0%, #9E3F08 100%);
+    color: #FFFFFF;
+    border-top: 1px solid rgba(255, 255, 255, 0.25);
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.1), inset 0 1px 0 0 rgba(255, 255, 255, 0.2);
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .btn-copper:hover {
+    background-image: linear-gradient(180deg, #D96B28 0%, #B34B0C 100%);
+    box-shadow: 0 4px 14px 0 rgba(179, 75, 12, 0.28), inset 0 1px 0 0 rgba(255, 255, 255, 0.35);
+    transform: translateY(-1px);
+  }
+
+  .btn-copper:active {
+    transform: translateY(1px);
+    background-image: linear-gradient(180deg, #9E3F08 0%, #7C3306 100%);
+    box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.25);
+  }
+
+  /* Píldora láser luminosa para pestañas activas */
+  .laser-tab-active {
+    position: relative;
+    color: #B34B0C !important;
+    background-color: rgba(179, 75, 12, 0.06);
+  }
+
+  .dark .laser-tab-active {
+    color: #E27230 !important;
+    background-color: rgba(179, 75, 12, 0.15);
+  }
+
+  .laser-tab-active::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 12%;
+    width: 76%;
+    height: 2px;
+    background: #B34B0C;
+    border-radius: 9999px;
+    box-shadow: 0 0 8px 1px #B34B0C, 0 0 14px 2px rgba(179, 75, 12, 0.4);
+  }
+
+  .dark .laser-tab-active::after {
+    background: #F28038;
+    box-shadow: 0 0 10px 2px #E27230, 0 0 16px 3px rgba(226, 114, 48, 0.5);
+  }
+
+  /* Marcas de registro técnico / CAD Crosshairs */
+  .crosshair-corner {
+    position: relative;
+  }
+  .crosshair-corner::before {
+    content: '+';
+    position: absolute;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    line-height: 1;
+    color: rgba(179, 75, 12, 0.4);
+    pointer-events: none;
+  }
+
+  /* Terminal forense oscura */
+  .terminal-forense {
+    background-color: #09090B;
+    border: 1px solid rgba(16, 185, 129, 0.25);
+    box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.8), 0 0 12px rgba(16, 185, 129, 0.08);
   }
 }

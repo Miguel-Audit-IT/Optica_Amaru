@@ -214,7 +214,7 @@ export const PublicQRView: React.FC = () => {
                 />
               </div>
 
-              {/* Checkbox Obligatorio Ley 19.628 */}
+              {/* Checkbox Obligatorio Ley N° 21.719 (Protección de Datos Médicos y Biométricos) */}
               <div className="bg-slate-50 dark:bg-[#1A1816] border border-slate-200 dark:border-slate-700 p-3.5 rounded-xl space-y-1">
                 <label className="flex items-start space-x-2.5 cursor-pointer">
                   <input
@@ -222,11 +222,11 @@ export const PublicQRView: React.FC = () => {
                     checked={consentimiento}
                     onChange={(e) => setConsentimiento(e.target.checked)}
                     className="h-4 w-4 mt-0.5 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-[#2A2522] accent-[#B34B0C] cursor-pointer shrink-0"
+                    required
                   />
                   <span className="text-xs text-slate-600 dark:text-slate-300 leading-tight">
-                    Autorizo el tratamiento de mis datos personales y biométricos conforme a la{' '}
-                    <strong className="text-slate-900 dark:text-white">Ley N° 19.628</strong> para la
-                    emisión de EPP óptico en faena.
+                    Acepto el tratamiento de mis datos médicos y biométricos para la confección del EPP óptico, según la{' '}
+                    <strong className="text-slate-900 dark:text-white">Ley N° 21.719</strong>.
                   </span>
                 </label>
               </div>
@@ -516,7 +516,7 @@ export const PublicQRView: React.FC = () => {
         {/* ── Footer Informativo ── */}
         <footer className="text-center text-[11px] text-slate-500 dark:text-slate-400 space-y-1">
           <p>© 2026 Óptica Amaru — Plataforma Health-Tech EPP Minería</p>
-          <p className="font-mono text-[10px]">Trazabilidad D.S. 594 & Ley N° 19.628</p>
+          <p className="font-mono text-[10px]">Trazabilidad D.S. 594 & Ley N° 21.719</p>
         </footer>
       </div>
     </div>

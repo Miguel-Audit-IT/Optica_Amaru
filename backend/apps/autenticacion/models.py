@@ -88,6 +88,23 @@ class Paciente(models.Model):
     )
     consentimiento_biometrico = models.BooleanField(default=False)
 
+    # Cumplimiento Ley 21.719 y Privacidad (HU-SEC-03)
+    consentimiento_ley_21719 = models.BooleanField(
+        default=False,
+        help_text="Aceptación explícita de tratamiento de datos médicos y biométricos."
+    )
+    fecha_consentimiento = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp del momento exacto de la aceptación."
+    )
+    ip_origen = models.GenericIPAddressField(
+        null=True,
+        blank=True,
+        protocol='both',
+        help_text="IP desde donde se otorgó el consentimiento."
+    )
+
     class Meta:
         db_table = 'paciente'
         verbose_name = 'Paciente'
@@ -161,3 +178,27 @@ class LoteNominaSindicato(models.Model):
 
     def __str__(self) -> str:
         return f"Lote {self.id_lote} ({self.total_registros} registros)"
+
+
+class NominaTrabajador(models.Model):
+    """
+    Nómina oficial de trabajadores habilitados en faena minera (Whitelist Anti-Fraude).
+    Garantiza que solo personal validado por la empresa mandante o sindicato pueda
+    acceder a prestaciones ópticas y EPP certificado.
+    """
+    rut = models.CharField(max_length=12, unique=True, db_index=True)
+    nombre_completo = models.CharField(max_length=150)
+    empresa_sindicato = models.CharField(max_length=150)
+    habilitado = models.BooleanField(default=True)
+    creado_el = models.DateTimeField(auto_now_add=True)
+    actualizado_el = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'nomina_trabajador'
+        verbose_name = 'Nómina de Trabajador'
+        verbose_name_plural = 'Nóminas de Trabajadores'
+
+    def __str__(self) -> str:
+        estado = "Habilitado" if self.habilitado else "Inhabilitado"
+        return f"{self.rut} - {self.nombre_completo} ({self.empresa_sindicato}) [{estado}]"
+

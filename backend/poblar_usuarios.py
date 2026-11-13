@@ -1,3 +1,10 @@
+import os
+import django
+
+# Inicializar configuración del entorno Django
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'amaru_project.settings')
+django.setup()
+
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 
@@ -5,7 +12,7 @@ User = get_user_model()
 
 print("Iniciando creación de perfiles y usuarios de prueba para Óptica Amaru...")
 
-# 1. Grupos / Roles
+# 1. Grupos / Roles RBAC
 roles = ['Administrador', 'Operador', 'Auditor']
 grupos = {}
 for rol in roles:
@@ -76,7 +83,7 @@ for cuenta in cuentas_personal:
     estado = "creado" if created else "actualizado"
     print(f"[{cuenta['rol']}] Usuario {user.username} ({user.first_name} {user.last_name}) {estado}.")
 
-# 3. Paciente Registrado
+# 3. Paciente Registrado (Trabajador en Faena)
 user_paciente, created = User.objects.get_or_create(username='18234567-8')
 user_paciente.first_name = 'Manuel'
 user_paciente.last_name = 'Gutiérrez'

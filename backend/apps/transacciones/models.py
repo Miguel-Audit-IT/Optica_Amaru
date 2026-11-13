@@ -67,6 +67,7 @@ class SolicitudEntrega(models.Model):
         default=EstadoPedido.RECIBIDA
     )
     version_seq = models.IntegerField(default=1)
+    sello_integridad_pdf = models.CharField(max_length=64, blank=True, null=True, help_text='Hash SHA-256 del comprobante oficial de entrega PDF sellado.')
     fecha_ingreso = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -234,6 +235,8 @@ class RecepcionDespacho(models.Model):
     )
     rut_receptor = models.CharField(max_length=12)
     codigo_barras_pdf417_leido = models.CharField(max_length=255)
+    firma_digital_b64 = models.TextField(blank=True, null=True, help_text='Firma digital simple del receptor en formato Base64 (PNG).')
+    sello_integridad_pdf = models.CharField(max_length=64, blank=True, null=True, help_text='Hash SHA-256 del comprobante oficial de entrega PDF sellado.')
     fecha_entrega = models.DateTimeField(auto_now_add=True)
 
     class Meta:

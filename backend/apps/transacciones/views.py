@@ -1,4 +1,7 @@
+import re
 from decimal import Decimal
+import base64
+import hashlib
 from django.db import transaction
 from django.http import HttpResponse
 from django.utils import timezone
@@ -6,6 +9,43 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from .dashboard_views import CanViewDashboard
+
+MENSAJE_BLOQUEO_LEY_21719 = (
+    "Acceso denegado: Por protección de datos clínicos (Ley 21.719), solo puede consultar sus propios pedidos."
+)
+
+
+def es_usuario_paciente_o_externo(user) -> bool:
+    """
+    Retorna True si el usuario autenticado tiene rol de Paciente
+    (o no pertenece a los grupos privilegiados Administrador, Operador, Auditor).
+    """
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_superuser or user.is_staff:
+        return False
+    if user.groups.filter(name__in=['Administrador', 'Operador', 'Auditor', 'Bodega']).exists():
+        return False
+    from apps.autenticacion.models import PersonalOptica
+    if PersonalOptica.objects.filter(rut_usuario_id=user.username).exists():
+        return False
+    return True
+
+
+def validar_acceso_paciente_a_pedido(user, solicitud) -> bool:
+    """
+    Valida si un paciente tiene derecho a acceder a la solicitud indicada.
+    Retorna True si tiene permiso, False si se viola la Ley 21.719.
+    """
+    if not es_usuario_paciente_o_externo(user):
+        return True
+
+    rut_usuario_limpio = re.sub(r'[^0-9kK]', '', str(user.username)).upper()
+    rut_pedido_limpio = re.sub(r'[^0-9kK]', '', str(solicitud.rut_paciente_id)).upper()
+    return rut_usuario_limpio == rut_pedido_limpio
+
+from apps.autenticacion.throttles import QRPublicRateThrottle
 
 from .models import (
     ArmazonInventario,
@@ -32,7 +72,13 @@ from .pdf_generator import (
 
 
 class CatalogoInventarioView(APIView):
+    """
+    Catálogo de armazones disponibles en stock.
+    HU-SEC-01: throttle_classes con QRPublicRateThrottle (10/min por IP)
+    previene scraping masivo del inventario desde el flujo QR público.
+    """
     permission_classes = [AllowAny]
+    throttle_classes = [QRPublicRateThrottle]
 
     def get(self, request):
         armazones = ArmazonInventario.objects.filter(stock_disponible__gt=0)
@@ -41,7 +87,13 @@ class CatalogoInventarioView(APIView):
 
 
 class SyncBatchPedidosView(APIView):
+    """
+    Sincronización de pedidos en lote desde el terminal offline.
+    HU-SEC-01: throttle_classes con QRPublicRateThrottle (10/min por IP)
+    limita la escritura masiva de pre-ingresos del flujo QR self-service.
+    """
     permission_classes = [AllowAny]
+    throttle_classes = [QRPublicRateThrottle]
 
     def post(self, request):
         serializer = SyncBatchInputSerializer(data=request.data)
@@ -168,10 +220,10 @@ class ComprobanteEntregaPDFView(APIView):
     GET /api/v1/transacciones/pedidos/<str:folio_qr>/comprobante-pdf/
 
     Genera y descarga el Comprobante Oficial de Entrega de EPP en PDF
-    con branding corporativo de Óptica Amaru, detalle de armazón,
-    parámetros ópticos, código QR del folio y recuadro de firma física/huella.
+    con branding corporativo de Óptica Amaru, firma electrónica simple (DS 594),
+    parámetros ópticos, código QR del folio y sello de integridad SHA-256.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request, folio_qr: str):
         try:
@@ -181,7 +233,8 @@ class ComprobanteEntregaPDFView(APIView):
                     'rut_paciente__rut_usuario',
                     'sku_armazon',
                     'rut_titular_pago__id_empresa',
-                    'id_receta'
+                    'id_receta',
+                    'recepcion_despacho'
                 )
                 .get(folio_unico_qr=folio_qr)
             )
@@ -191,10 +244,29 @@ class ComprobanteEntregaPDFView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        pdf_bytes = generar_comprobante_entrega_pdf(solicitud, receta=solicitud.id_receta)
+        if request.user.is_authenticated and not validar_acceso_paciente_a_pedido(request.user, solicitud):
+            return Response(
+                {'detail': MENSAJE_BLOQUEO_LEY_21719},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        recepcion = getattr(solicitud, 'recepcion_despacho', None)
+        firma_b64 = recepcion.firma_digital_b64 if recepcion else None
+
+        pdf_bytes = generar_comprobante_entrega_pdf(solicitud, receta=solicitud.id_receta, firma_b64=firma_b64)
+        sello_sha256 = hashlib.sha256(pdf_bytes).hexdigest()
+
+        # Asegurar persistencia del hash de integridad
+        if recepcion and not recepcion.sello_integridad_pdf:
+            recepcion.sello_integridad_pdf = sello_sha256
+            recepcion.save(update_fields=['sello_integridad_pdf'])
+        if not solicitud.sello_integridad_pdf:
+            solicitud.sello_integridad_pdf = sello_sha256
+            solicitud.save(update_fields=['sello_integridad_pdf'])
 
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
         response['Content-Disposition'] = f'inline; filename="comprobante_{folio_qr}.pdf"'
+        response['X-Sello-Integridad-SHA256'] = sello_sha256
         return response
 
 
@@ -230,6 +302,12 @@ class AcelerarFiniquitoPDFView(APIView):
             return Response(
                 {'error': f'Registro o presupuesto inexistente para folio {folio_qr}'},
                 status=status.HTTP_404_NOT_FOUND
+            )
+
+        if request.user.is_authenticated and not validar_acceso_paciente_a_pedido(request.user, solicitud):
+            return Response(
+                {'detail': MENSAJE_BLOQUEO_LEY_21719},
+                status=status.HTTP_403_FORBIDDEN
             )
 
         cuotas_pendientes = CuotaDescuento.objects.filter(
@@ -298,6 +376,12 @@ class AcelerarFiniquitoPDFView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
+        if request.user.is_authenticated and not validar_acceso_paciente_a_pedido(request.user, solicitud):
+            return Response(
+                {'detail': MENSAJE_BLOQUEO_LEY_21719},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         todas_cuotas = CuotaDescuento.objects.filter(id_presupuesto=presupuesto).order_by('numero_cuota')
         cuotas_finiquito = todas_cuotas.filter(estado_pago=CuotaDescuento.EstadoPago.COBRADO_FINIQUITO)
         if not cuotas_finiquito.exists():
@@ -341,7 +425,8 @@ AcelerarFiniquitoView = AcelerarFiniquitoPDFView
 class ConfirmarDespachoView(APIView):
     """
     POST /api/v1/transacciones/despacho/confirmar/
-    Registra la recepción física del EPP óptico validado con código PDF417.
+    Registra la recepción física del EPP óptico validado con código PDF417,
+    firma electrónica simple (DS 594) y sellado criptográfico SHA-256 del comprobante.
     """
     permission_classes = [AllowAny]
 
@@ -355,6 +440,20 @@ class ConfirmarDespachoView(APIView):
             or request.data.get('codigo_barras_pdf417_leido')
             or 'PDF417_SIMULADO'
         )
+        firma_b64 = (
+            request.data.get('firma_trabajador_b64')
+            or request.data.get('firma_b64')
+            or request.data.get('firma')
+        )
+
+        # Decodificación y validación en memoria del trazo Base64
+        firma_bytes = None
+        if firma_b64:
+            try:
+                raw_b64 = firma_b64.split(',', 1)[1] if ',' in firma_b64 else firma_b64
+                firma_bytes = base64.b64decode(raw_b64.strip())
+            except Exception:
+                firma_bytes = None
 
         if not folio or not rut_receptor:
             return Response(
@@ -364,12 +463,15 @@ class ConfirmarDespachoView(APIView):
 
         solicitud = SolicitudEntrega.objects.filter(folio_unico_qr=folio).first()
         if not solicitud:
+            dummy_pdf = f"FOLIO:{folio}|RECEPTOR:{rut_receptor}|FIRMA:{bool(firma_bytes)}".encode('utf-8')
+            sello_simulado = hashlib.sha256(dummy_pdf).hexdigest()
             return Response({
                 'mensaje': f'Despacho simulado para folio {folio} (modo local / pendiente de sincronizar).',
                 'folio': folio,
                 'tipo_receptor': tipo_receptor,
                 'rut_receptor': rut_receptor,
                 'estado': 'Entregada',
+                'sello_integridad_pdf': sello_simulado,
                 'simulado': True
             }, status=status.HTTP_200_OK)
 
@@ -385,7 +487,8 @@ class ConfirmarDespachoView(APIView):
                 defaults={
                     'tipo_receptor': tipo_enum,
                     'rut_receptor': rut_receptor,
-                    'codigo_barras_pdf417_leido': codigo_pdf417
+                    'codigo_barras_pdf417_leido': codigo_pdf417,
+                    'firma_digital_b64': firma_b64,
                 }
             )
             solicitud.estado_pedido = SolicitudEntrega.EstadoPedido.ENTREGADA
@@ -400,13 +503,204 @@ class ConfirmarDespachoView(APIView):
                 cantidad=-1
             )
 
+        # Generar comprobante PDF con firma estampada y calcular Sello de Integridad SHA-256
+        pdf_bytes = generar_comprobante_entrega_pdf(
+            solicitud=solicitud,
+            receta=solicitud.id_receta,
+            firma_b64=firma_b64
+        )
+        sello_sha256 = hashlib.sha256(pdf_bytes).hexdigest()
+
+        # Guardar sello de integridad en la base de datos
+        recepcion.sello_integridad_pdf = sello_sha256
+        recepcion.save(update_fields=['sello_integridad_pdf'])
+
+        solicitud.sello_integridad_pdf = sello_sha256
+        solicitud.save(update_fields=['sello_integridad_pdf'])
+
         return Response({
-            'mensaje': f'Despacho y entrega confirmados para folio {folio}.',
+            'mensaje': f'Despacho y entrega confirmados para folio {folio}. Comprobante sellado con SHA-256.',
             'id_recepcion': str(recepcion.id_recepcion),
             'folio': folio,
             'tipo_receptor': recepcion.tipo_receptor,
             'rut_receptor': recepcion.rut_receptor,
             'estado': solicitud.estado_pedido,
+            'sello_integridad_pdf': sello_sha256,
             'simulado': False
         }, status=status.HTTP_200_OK)
+
+
+class SeguimientoPedidoView(APIView):
+    """
+    GET /api/v1/transacciones/pedidos/<str:folio_qr>/seguimiento/
+    GET /api/v1/transacciones/seguimiento/?folio=<folio>&rut=<rut>
+
+    Consulta el seguimiento y estado de trazabilidad omnicanal de pedidos.
+    Blindaje Ley 21.719: Si el usuario es 'Paciente', SOLO puede consultar
+    pedidos asociados a su propio RUT. Intentos de consultar folios o RUTs ajenos
+    retornan HTTP 403 Forbidden.
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request, folio_qr: str = None):
+        folio = folio_qr or request.query_params.get('folio')
+        rut_param = request.query_params.get('rut')
+        user = request.user
+
+        # 1. Consulta por Folio específico
+        if folio:
+            folio = folio.strip()
+            solicitud = (
+                SolicitudEntrega.objects
+                .select_related(
+                    'rut_paciente__rut_usuario',
+                    'rut_paciente__id_empresa',
+                    'sku_armazon',
+                    'rut_titular_pago',
+                    'id_receta',
+                    'recepcion_despacho',
+                    'presupuesto'
+                )
+                .filter(folio_unico_qr__iexact=folio)
+                .first()
+            )
+
+            if not solicitud:
+                return Response(
+                    {'error': f'Pedido con folio {folio} no encontrado.'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            # Blindaje Ley 21.719 si el usuario está autenticado
+            if user.is_authenticated and not validar_acceso_paciente_a_pedido(user, solicitud):
+                return Response(
+                    {'detail': MENSAJE_BLOQUEO_LEY_21719},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+            return Response(self._serializar_pedido(solicitud), status=status.HTTP_200_OK)
+
+        # 2. Consulta por RUT o listado de pedidos del paciente autenticado
+        if user.is_authenticated and es_usuario_paciente_o_externo(user):
+            # Paciente autenticado: restringir estrictamente a su propio RUT
+            if rut_param:
+                rut_param_limpio = re.sub(r'[^0-9kK]', '', str(rut_param)).upper()
+                rut_user_limpio = re.sub(r'[^0-9kK]', '', str(user.username)).upper()
+                if rut_param_limpio != rut_user_limpio:
+                    return Response(
+                        {'detail': MENSAJE_BLOQUEO_LEY_21719},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+            rut_busqueda = user.username
+        else:
+            rut_busqueda = rut_param
+
+        if not rut_busqueda:
+            return Response(
+                {'error': 'Debe proporcionar un folio o un RUT para consultar el seguimiento.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        rut_clean = re.sub(r'[^0-9kK]', '', str(rut_busqueda)).upper()
+        solicitudes = (
+            SolicitudEntrega.objects
+            .select_related(
+                'rut_paciente__rut_usuario',
+                'rut_paciente__id_empresa',
+                'sku_armazon',
+                'rut_titular_pago',
+                'id_receta',
+                'recepcion_despacho',
+                'presupuesto'
+            )
+            .filter(rut_paciente_id__icontains=rut_clean)
+            .order_by('-fecha_ingreso')
+        )
+
+        data = [self._serializar_pedido(s) for s in solicitudes]
+        return Response(data, status=status.HTTP_200_OK)
+
+    def _serializar_pedido(self, solicitud: SolicitudEntrega) -> dict:
+        paciente = solicitud.rut_paciente
+        usuario = getattr(paciente, 'rut_usuario', None) if paciente else None
+        nombre = f"{usuario.nombres} {usuario.apellidos}" if usuario else str(solicitud.rut_paciente_id)
+        empresa_nombre = (
+            paciente.id_empresa.razon_social
+            if (paciente and paciente.id_empresa)
+            else "Atención Particular"
+        )
+
+        presupuesto = getattr(solicitud, 'presupuesto', None)
+        saldo = float(presupuesto.monto_total) if presupuesto else 0.0
+        aceleracion = bool(presupuesto.clausula_aceleracion_aceptada) if presupuesto else False
+
+        # Generación de hitos según estado del pedido
+        estado = solicitud.estado_pedido
+        hitos = [
+            {
+                'id': 'hito-clinico',
+                'nombre': 'Validación Clínica & Graduación',
+                'subtitulo': 'Receta médica visada',
+                'descripcion': 'Parámetros ópticos y refracción procesados en sistema.',
+                'fecha': solicitud.fecha_ingreso.strftime('%d-%m-%Y %H:%M') if solicitud.fecha_ingreso else '',
+                'estado': 'completed',
+                'tipoIcono': 'clinica',
+            },
+            {
+                'id': 'hito-laboratorio',
+                'nombre': 'Laboratorio Óptico',
+                'subtitulo': 'Fabricación de cristales y biselado',
+                'descripcion': 'Biselado de alta precisión y control de filtros.',
+                'estado': 'completed' if estado in ['En_Fabricacion', 'Transito', 'Lista', 'Entregada', 'Retencion_Laboral'] else 'active',
+                'tipoIcono': 'laboratorio',
+            },
+            {
+                'id': 'hito-despacho',
+                'nombre': 'Despacho & Logística',
+                'subtitulo': 'En tránsito a destino o sucursal',
+                'descripcion': 'Embalaje de seguridad y transporte.',
+                'estado': 'completed' if estado in ['Transito', 'Lista', 'Entregada', 'Retencion_Laboral'] else ('active' if estado == 'Transito' else 'pending'),
+                'tipoIcono': 'despacho',
+            },
+            {
+                'id': 'hito-entrega',
+                'nombre': 'Entrega Conforme',
+                'subtitulo': 'Recepción y firma del paciente',
+                'descripcion': 'Acreditación presencial con firma digital y verificación.',
+                'fecha': getattr(solicitud.recepcion_despacho, 'fecha_entrega', '').isoformat() if hasattr(solicitud, 'recepcion_despacho') else '',
+                'estado': 'completed' if estado == 'Entregada' else 'pending',
+                'tipoIcono': 'entrega',
+                'selloSha256': solicitud.sello_integridad_pdf or '',
+            },
+            {
+                'id': 'hito-financiero',
+                'nombre': 'Estado Financiero',
+                'subtitulo': 'Finiquito Laboral / Liquidación' if aceleracion else 'Modalidad de Pago Normal',
+                'descripcion': 'Descuento consolidado por término laboral (Art. 177)' if aceleracion else 'Convenio y cuotas registradas.',
+                'estado': 'alert' if aceleracion else 'completed',
+                'tipoIcono': 'finanzas',
+            }
+        ]
+
+        return {
+            'folio': solicitud.folio_unico_qr,
+            'rutTitular': solicitud.rut_paciente_id,
+            'nombreTitular': nombre,
+            'empresaEmpleadora': empresa_nombre,
+            'sindicatoFaena': 'Plan Óptico Registrado',
+            'saldoTotal': saldo,
+            'modeloArmazon': (
+                f"{solicitud.sku_armazon_id} - {solicitud.sku_armazon.modelo_lente}"
+                if solicitud.sku_armazon
+                else 'Armazón Óptico'
+            ),
+            'fechaIngreso': (
+                solicitud.fecha_ingreso.strftime('%d de %B %Y, %H:%M hrs')
+                if solicitud.fecha_ingreso
+                else ''
+            ),
+            'estadoBadge': estado.upper(),
+            'tieneAceleracionFiniquito': aceleracion,
+            'hitos': hitos,
+        }
 

@@ -43,6 +43,7 @@ export interface NuevaRecetaPayload {
   fecha_emision: string;
   parametros_oftalmologicos: ParametrosOftalmologicos;
   archivo_url?: string;
+  archivo_receta?: File;
 }
 
 /**
@@ -60,16 +61,29 @@ export function calcularVigenciaReceta(fechaEmision: string): { dias: number; es
   };
 }
 
-export async function registrarReceta(payload: NuevaRecetaPayload): Promise<RecetaOpticaItem> {
+export async function registrarReceta(payload: NuevaRecetaPayload | FormData): Promise<RecetaOpticaItem> {
+  const isFormData = payload instanceof FormData;
+  const token = localStorage.getItem('amaru_access_token');
+
+  // Si es FormData, omitimos Content-Type para que el navegador fije el boundary multipart/form-data
+  const headers: Record<string, string> = {};
+  if (!isFormData) {
+    headers['Content-Type'] = 'application/json';
+  }
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const res = await fetch(`${API_BASE}/recetas/`, {
     method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify(payload),
+    headers,
+    body: isFormData ? payload : JSON.stringify(payload),
   });
 
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({}));
     const errorMsg =
+      errorData.archivo_receta?.[0] ||
       errorData.fecha_emision?.[0] ||
       errorData.rut_paciente?.[0] ||
       errorData.detail ||

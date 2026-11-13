@@ -3,10 +3,10 @@ from .views import (
     CatalogoInventarioView,
     SyncBatchPedidosView,
     SubirComprobanteView,
-    AcelerarFiniquitoView,
     AcelerarFiniquitoPDFView,
     ComprobanteEntregaPDFView,
     ConfirmarDespachoView,
+    SeguimientoPedidoView,
 )
 from .dashboard_views import (
     DashboardResumenView,
@@ -20,6 +20,12 @@ urlpatterns = [
 
     # ── Sincronización offline (FIFO queue) ───────────────────────────────────
     path('transacciones/sync-batch/', SyncBatchPedidosView.as_view(), name='sync_batch_pedidos'),
+
+    # ── Trazabilidad y Seguimiento Clínico / Omnicanal (Ley 21.719) ───────────
+    path('transacciones/pedidos/<str:folio_qr>/seguimiento/', SeguimientoPedidoView.as_view(), name='seguimiento_pedido'),
+    path('pedidos/<str:folio_qr>/seguimiento/', SeguimientoPedidoView.as_view(), name='seguimiento_pedido_alias'),
+    path('transacciones/seguimiento/', SeguimientoPedidoView.as_view(), name='seguimiento_query'),
+    path('seguimiento/', SeguimientoPedidoView.as_view(), name='seguimiento_root'),
 
     # ── Gestión documental y finanzas ─────────────────────────────────────────
     path('pedidos/<str:folio_unico_qr>/comprobante/', SubirComprobanteView.as_view(), name='subir_comprobante'),
