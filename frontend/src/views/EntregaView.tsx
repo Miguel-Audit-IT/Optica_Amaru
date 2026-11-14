@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import SignatureCanvas from 'react-signature-canvas';
 import {
   Truck,
@@ -20,6 +20,39 @@ import {
 } from 'lucide-react';
 import { validarRUT, normalizarInputRUT, formatearRUT } from '../utils/rut';
 import { confirmarDespacho, type ConfirmarDespachoResponse } from '../services/despachoService';
+import { getSucursalActiva } from '../services/inventarioService';
+
+interface PedidoListoRetiro {
+  folio: string;
+  titular: string;
+  rut: string;
+  armazon: string;
+  tipoConvenio: string;
+}
+
+const PEDIDOS_LISTOS_RETIRO: PedidoListoRetiro[] = [
+  {
+    folio: 'FOLIO-8F1085AD',
+    titular: 'Mario Cárdenas Gómez',
+    rut: '16.784.920-3',
+    armazon: 'Titanio Pro ANSI Z87.1',
+    tipoConvenio: 'Convenio Minero Faena',
+  },
+  {
+    folio: 'FOLIO-4D7E1123',
+    titular: 'Roberto Morales Pérez',
+    rut: '14.238.901-5',
+    armazon: 'Cristales Progresivos Antifatiga',
+    tipoConvenio: 'Atención Sucursal',
+  },
+  {
+    folio: 'FOLIO-2B4C8901',
+    titular: 'Claudia Soto Riquelme',
+    rut: '18.904.512-8',
+    armazon: 'Acetato Lumière Blue-Light',
+    tipoConvenio: 'Cliente Particular',
+  },
+];
 
 interface EntregaViewProps {
   isOnline: boolean;
@@ -27,6 +60,7 @@ interface EntregaViewProps {
 }
 
 export const EntregaView: React.FC<EntregaViewProps> = ({ isOnline }) => {
+  const [sucursalActiva, setSucursalActiva] = useState<'Calama' | 'Antofagasta'>(() => getSucursalActiva());
   const [folio, setFolio] = useState('');
   const [tipoReceptor, setTipoReceptor] = useState<'Titular' | 'Tercero_Autorizado'>('Titular');
   const [rutReceptor, setRutReceptor] = useState('');
@@ -40,6 +74,40 @@ export const EntregaView: React.FC<EntregaViewProps> = ({ isOnline }) => {
   const [resultado, setResultado] = useState<ConfirmarDespachoResponse | null>(null);
 
   const sigPadRef = useRef<SignatureCanvas | null>(null);
+
+  useEffect(() => {
+    const handleSucursal = () => setSucursalActiva(getSucursalActiva());
+    window.addEventListener('amaru_sucursal_updated', handleSucursal);
+    window.addEventListener('storage', handleSucursal);
+    return () => {
+      window.removeEventListener('amaru_sucursal_updated', handleSucursal);
+      window.removeEventListener('storage', handleSucursal);
+    };
+  }, []);
+
+  const handleSeleccionarPedidoListo = (pedido: PedidoListoRetiro) => {
+    setFolio(pedido.folio);
+    setTipoReceptor('Titular');
+    setRutReceptor(pedido.rut);
+    setErrorRutReceptor('');
+    const rutLimpio = pedido.rut.replace(/[^0-9kK]/g, '');
+    setCodigoPdf417(`CHL-SRC-RUN-${rutLimpio}-DOC-8823910-TYP-CED-VER-2026`);
+    setEscanExitoso(true);
+  };
+
+  useEffect(() => {
+    const precargado = localStorage.getItem('amaru_folio_entrega_precargado');
+    if (precargado) {
+      setFolio(precargado.toUpperCase());
+      localStorage.removeItem('amaru_folio_entrega_precargado');
+      const match = PEDIDOS_LISTOS_RETIRO.find(
+        (p) => p.folio.toUpperCase() === precargado.toUpperCase()
+      );
+      if (match) {
+        handleSeleccionarPedidoListo(match);
+      }
+    }
+  }, []);
 
   // Manejo de cambio en el RUT del receptor
   const handleRutChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -149,14 +217,14 @@ export const EntregaView: React.FC<EntregaViewProps> = ({ isOnline }) => {
           <div>
             <div className="flex items-center gap-2.5">
               <h2 className="text-xl font-bold tracking-tight text-[#201E1C] dark:text-white">
-                Módulo de Entrega y Despacho en Faena
+                Paso Final: Entrega de Lentes en Sucursal
               </h2>
               <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-full text-[11px] font-semibold">
-                Validación Phygital PDF417
+                Sucursal {sucursalActiva}
               </span>
             </div>
             <p className="text-xs text-[#6C6A68] dark:text-amaru-light-gray mt-0.5">
-              Confirmación fehaciente de recepción de EPP óptico y descargo de inventario
+              Acreditación de identidad, firma de recepción conforme y cierre del pedido
             </p>
           </div>
         </div>
@@ -249,8 +317,66 @@ export const EntregaView: React.FC<EntregaViewProps> = ({ isOnline }) => {
                 Identificación del Pedido
               </h3>
               <p className="text-xs text-[#6C6A68] dark:text-amaru-light-gray mt-0.5">
-                Pistolee el código QR o digite el folio de la solicitud
+                Seleccione un pedido listo para entrega o pistolee el código QR
               </p>
+            </div>
+
+            {/* ── Selector Rápido: Pedidos Listos para Retiro en Sucursal ── */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold uppercase tracking-wider text-amaru-copper flex items-center gap-1.5">
+                  <Sparkles size={14} />
+                  <span>Pedidos Listos para Retiro en Sucursal {sucursalActiva}</span>
+                </label>
+                <span className="text-[10px] font-semibold text-slate-400 dark:text-zinc-500">
+                  Selección rápida en mesón
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2">
+                {PEDIDOS_LISTOS_RETIRO.map((item) => {
+                  const isSelected = folio.toUpperCase() === item.folio.toUpperCase();
+                  return (
+                    <button
+                      key={item.folio}
+                      type="button"
+                      onClick={() => handleSeleccionarPedidoListo(item)}
+                      className={`w-full text-left p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                        isSelected
+                          ? 'border-amaru-copper bg-amaru-copper/10 ring-2 ring-amaru-copper/40 shadow-xs'
+                          : 'border-slate-200 dark:border-white/10 bg-slate-50/70 dark:bg-black/20 hover:border-amaru-copper/50 hover:bg-white dark:hover:bg-white/[0.03]'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-extrabold text-amaru-copper">
+                            {item.folio}
+                          </span>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+                            Listo para Retiro
+                          </span>
+                        </div>
+                        <h4 className="text-xs font-bold text-slate-800 dark:text-zinc-100 truncate mt-0.5">
+                          {item.titular} · <span className="font-mono font-medium text-slate-500 dark:text-zinc-400">{item.rut}</span>
+                        </h4>
+                        <p className="text-[11px] text-slate-500 dark:text-zinc-400 truncate">
+                          {item.armazon} · <span className="text-slate-400">{item.tipoConvenio}</span>
+                        </p>
+                      </div>
+
+                      <div className="shrink-0 text-right">
+                        <span className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all ${
+                          isSelected
+                            ? 'bg-amaru-copper text-white shadow-2xs'
+                            : 'bg-white dark:bg-zinc-800 text-slate-600 dark:text-zinc-300 border border-slate-200 dark:border-zinc-700'
+                        }`}>
+                          {isSelected ? 'Cargado ✓' : 'Cargar'}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Buscador de Folio */}

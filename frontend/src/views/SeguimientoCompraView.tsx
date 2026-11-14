@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Search,
   CheckCircle2,
@@ -28,11 +29,14 @@ import {
   Lock,
   MapPin,
   Plus,
+  Compass,
+  PackageCheck,
 } from 'lucide-react';
 import { formatearRUT } from '../utils/rut';
-import { getUserInfo, isUserPatient } from '../utils/auth';
+import { getUserInfo, isUserPatient, isUserOperator } from '../utils/auth';
 import { AutoRecetaModal } from '../components/AutoRecetaModal';
 import { WhatsAppIcon } from '../components/icons/WhatsAppIcon';
+import { getSucursalActiva } from '../services/inventarioService';
 import {
   TitanioProIcon,
   AcetatoLumiereIcon,
@@ -87,6 +91,24 @@ export interface PedidoTrazabilidad {
   tieneAceleracionFiniquito: boolean;
   hitos: HitoTrazabilidad[];
 }
+
+export const limpiarEstadoHumano = (estado?: string): string => {
+  if (!estado) return 'EN PROCESAMIENTO';
+  const e = estado.toUpperCase();
+  if (e.includes('RETENCION_LABORAL') || e.includes('FINIQUITO')) {
+    return 'CONVENIO ACTIVO · LISTO EN SUCURSAL';
+  }
+  if (e.includes('DESPACHO')) {
+    return 'EN DESPACHO A SUCURSAL';
+  }
+  if (e.includes('LABORATORIO')) {
+    return 'EN LABORATORIO ÓPTICO';
+  }
+  if (e.includes('ENTREGADO')) {
+    return 'ENTREGADO CONFORME';
+  }
+  return estado.replace(/_/g, ' ').trim();
+};
 
 // ── Base de Datos Simulada para Demostración e Inspección Inmediata ──────────
 
@@ -327,8 +349,43 @@ function formatCLP(value: number): string {
 // ── Componente Principal ─────────────────────────────────────────────────────
 
 export const SeguimientoCompraView: React.FC = () => {
+  const navigate = useNavigate();
   const userInfo = getUserInfo();
   const esPaciente = isUserPatient();
+  const esOperador = isUserOperator();
+  const [sucursalActiva, setSucursalActivaState] = useState<'Calama' | 'Antofagasta'>(() => getSucursalActiva());
+
+  const [llegadasAcreditadas, setLlegadasAcreditadas] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem('amaru_llegadas_acreditadas');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const handleAcreditarLlegada = (folio: string) => {
+    const updated = { ...llegadasAcreditadas, [folio]: true };
+    setLlegadasAcreditadas(updated);
+    localStorage.setItem('amaru_llegadas_acreditadas', JSON.stringify(updated));
+    setToastMensaje(`✓ Llegada a Tienda acreditada para el pedido ${folio}. Listo para entrega.`);
+    setTimeout(() => setToastMensaje(null), 4000);
+  };
+
+  const handleIrAEntregar = (folio: string) => {
+    localStorage.setItem('amaru_folio_entrega_precargado', folio);
+    navigate('/despacho');
+  };
+
+  useEffect(() => {
+    const handleSucursalUpdated = () => setSucursalActivaState(getSucursalActiva());
+    window.addEventListener('amaru_sucursal_updated', handleSucursalUpdated);
+    window.addEventListener('storage', handleSucursalUpdated);
+    return () => {
+      window.removeEventListener('amaru_sucursal_updated', handleSucursalUpdated);
+      window.removeEventListener('storage', handleSucursalUpdated);
+    };
+  }, []);
 
   const [inputFolio, setInputFolio] = useState<string>(
     esPaciente ? (userInfo.rut || '') : 'FOLIO-8F1085AD'
@@ -631,8 +688,18 @@ export const SeguimientoCompraView: React.FC = () => {
         return;
       }
 
-      // 4. Si no es paciente, permitir catálogo demo o simulación
-      if (PEDIDOS_DEMO[terminoMayus]) {
+      // 4. Si no es paciente, permitir catálogo demo o simulación (búsqueda por Folio, RUT o Nombre)
+      const matchDemo = Object.values(PEDIDOS_DEMO).find(
+        (p) =>
+          p.folio.toUpperCase() === terminoMayus ||
+          (terminoLimpio.length >= 7 && p.rutTitular.replace(/[^0-9kK]/g, '').toUpperCase() === terminoLimpio) ||
+          p.nombreTitular.toLowerCase().includes(termino.toLowerCase())
+      );
+      if (matchDemo) {
+        setPedidoActual(matchDemo);
+        setInputFolio(matchDemo.folio);
+        setSinPedidos(false);
+      } else if (PEDIDOS_DEMO[terminoMayus]) {
         setPedidoActual(PEDIDOS_DEMO[terminoMayus]);
         setInputFolio(terminoMayus);
         setSinPedidos(false);
@@ -825,7 +892,7 @@ export const SeguimientoCompraView: React.FC = () => {
 
   return (
     <div className="w-full space-y-6 pb-12 animate-in fade-in duration-300">
-      {/* ── Encabezado de Vista: Saludo Humano para Paciente vs Trazabilidad Técnica para Operador ── */}
+      {/* ── Encabezado de Vista: Saludo Humano para Paciente vs Trazabilidad Técnica para Operador / Admin ── */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
         <div>
           {esPaciente ? (
@@ -835,6 +902,23 @@ export const SeguimientoCompraView: React.FC = () => {
               </h2>
               <p className="text-xs sm:text-sm text-slate-500 dark:text-zinc-400 mt-1">
                 Resumen de tu salud visual y seguimiento de tus lentes.
+              </p>
+            </>
+          ) : esOperador ? (
+            <>
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 rounded-lg bg-amaru-copper/10 text-amaru-copper dark:bg-amaru-copper/20">
+                  <Compass size={18} />
+                </span>
+                <span className="text-xs font-bold tracking-wider uppercase text-amaru-copper">
+                  Consulta Rápida de Pedidos en Mesón
+                </span>
+              </div>
+              <h2 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white mt-1">
+                Seguimiento de Venta y Laboratorio
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-zinc-400">
+                Información en tiempo real para informar el avance a tus pacientes y coordinar entregas.
               </p>
             </>
           ) : (
@@ -859,17 +943,19 @@ export const SeguimientoCompraView: React.FC = () => {
 
         {/* Acceso rápido a comprobantes PDF y Soporte WhatsApp */}
         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-          {/* Botón de Soporte por WhatsApp */}
-          <a
-            href={`https://wa.me/56985860973?text=Hola,%20necesito%20asistencia%20en%20el%20Portal%20del%20Paciente%20(RUT:%20${encodeURIComponent(userInfo.rut || userInfo.username || '')})`}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="Abrir chat de WhatsApp para asistencia técnica o logística"
-            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white shadow-xs hover:shadow-md transition-all cursor-pointer"
-          >
-            <WhatsAppIcon size={16} />
-            <span>Contactar Soporte</span>
-          </a>
+          {/* Botón de Soporte por WhatsApp (Ocultar estrictamente para el Vendedor) */}
+          {!esOperador && (
+            <a
+              href={`https://wa.me/56985860973?text=Hola,%20necesito%20asistencia%20en%20el%20Portal%20del%20Paciente%20(RUT:%20${encodeURIComponent(userInfo.rut || userInfo.username || '')})`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Abrir chat de WhatsApp para asistencia técnica o logística"
+              className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white shadow-xs hover:shadow-md transition-all cursor-pointer"
+            >
+              <WhatsAppIcon size={16} />
+              <span>Contactar Soporte</span>
+            </a>
+          )}
 
           {pedidoActual?.hitos?.find((h) => h.id === 'hito-entrega' && h.selloSha256) && (
             <button
@@ -884,7 +970,8 @@ export const SeguimientoCompraView: React.FC = () => {
             </button>
           )}
 
-          {pedidoActual?.tieneAceleracionFiniquito && (
+          {/* Ocultar Liquidación Finiquito PDF estrictamente para el Vendedor */}
+          {!esOperador && pedidoActual?.tieneAceleracionFiniquito && (
             <button
               onClick={() => handleDescargarFiniquito(pedidoActual.folio)}
               disabled={descargandoPDF !== null}
@@ -1434,7 +1521,7 @@ export const SeguimientoCompraView: React.FC = () => {
 
       {/* ── Buscador Superior Minimalista (Solo para Operador / Admin / Auditor) ── */}
       {!esPaciente && (
-        <div className="card-zenith rounded-2xl p-5 transition-all">
+        <div className="card-zenith rounded-2xl p-5 sm:p-6 transition-all">
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -1450,34 +1537,40 @@ export const SeguimientoCompraView: React.FC = () => {
                 type="text"
                 value={inputFolio}
                 onChange={(e) => setInputFolio(e.target.value)}
-                placeholder="Ingresa Folio del Pedido (ej. FOLIO-8F1085AD)..."
-                className="w-full pl-10 pr-4 py-2.5 text-sm bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amaru-copper focus:border-transparent text-slate-900 dark:text-white placeholder:text-slate-400 font-mono font-medium uppercase transition-colors"
+                placeholder={
+                  esOperador
+                    ? "Buscar por RUT, Nombre del Cliente o Folio (ej. Mario Cárdenas, 24.533.343-9, FOLIO-8F1085AD)..."
+                    : "Ingresa Folio del Pedido (ej. FOLIO-8F1085AD)..."
+                }
+                className="w-full pl-10 pr-4 py-2.5 sm:py-3 text-sm bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-amaru-copper focus:border-transparent text-slate-900 dark:text-white placeholder:text-slate-400 font-medium transition-colors"
               />
             </div>
 
             <button
               type="submit"
               disabled={buscando}
-              className="btn-copper px-5 py-2.5 rounded-xl font-semibold text-xs tracking-wider uppercase transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              className="btn-copper px-6 py-2.5 sm:py-3 rounded-xl font-bold text-xs tracking-wider uppercase transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 shrink-0"
             >
               {buscando ? (
                 <span className="inline-block animate-spin">⏳</span>
               ) : (
                 <Search size={16} />
               )}
-              <span>Buscar Folio</span>
+              <span>{esOperador ? 'Buscar Pedido' : 'Buscar Folio'}</span>
             </button>
 
-            <a
-              href={`https://wa.me/56985860973?text=Hola,%20necesito%20ayuda%20con%20mi%20pedido%20folio:%20${encodeURIComponent(pedidoActual?.folio || inputFolio || '')}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Contactar soporte por WhatsApp"
-              className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-semibold text-xs tracking-wide transition-all flex items-center justify-center gap-2 shadow-xs cursor-pointer shrink-0"
-            >
-              <WhatsAppIcon size={16} />
-              <span>Contactar Soporte</span>
-            </a>
+            {!esOperador && (
+              <a
+                href={`https://wa.me/56985860973?text=Hola,%20necesito%20ayuda%20con%20mi%20pedido%20folio:%20${encodeURIComponent(pedidoActual?.folio || inputFolio || '')}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Contactar soporte por WhatsApp"
+                className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-semibold text-xs tracking-wide transition-all flex items-center justify-center gap-2 shadow-xs cursor-pointer shrink-0"
+              >
+                <WhatsAppIcon size={16} />
+                <span>Contactar Soporte</span>
+              </a>
+            )}
           </form>
 
           {mensajeError && (
@@ -1487,53 +1580,53 @@ export const SeguimientoCompraView: React.FC = () => {
             </div>
           )}
 
-          {/* Selector rápido de folios de prueba para revisión inmediata (Solo staff/operador) */}
-          <div className="mt-4 pt-3 border-t border-slate-100 dark:border-white/10 flex flex-wrap items-center gap-2">
-            <span className="text-[11px] font-semibold text-slate-400 dark:text-zinc-500 uppercase tracking-wider">
-              Ejemplos de Atención Omnicanal:
+          {/* Selector rápido de folios/clientes de prueba */}
+          <div className="mt-4 pt-3.5 border-t border-slate-100 dark:border-white/10 flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-wider">
+              {esOperador ? 'Ejemplos Rápidos de Clientes:' : 'Ejemplos de Atención Omnicanal:'}
             </span>
             <button
               type="button"
               onClick={() => handleBuscar('FOLIO-8F1085AD')}
-              className={`text-xs px-2.5 py-1.5 rounded-lg border font-mono transition-all cursor-pointer flex items-center gap-1.5 ${
+              className={`text-xs px-3 py-1.5 rounded-xl border transition-all cursor-pointer flex items-center gap-2 ${
                 pedidoActual?.folio === 'FOLIO-8F1085AD'
-                  ? 'bg-amber-500/10 border-amber-500/40 text-amber-700 dark:text-amber-300 font-bold shadow-2xs'
-                  : 'bg-slate-50 dark:bg-black/30 border-slate-200 dark:border-white/10 text-slate-600 dark:text-zinc-400 hover:border-amaru-copper'
+                  ? 'bg-amber-500/15 border-amber-500/40 text-amber-800 dark:text-amber-200 font-bold shadow-xs'
+                  : 'bg-slate-50 dark:bg-black/30 border-slate-200 dark:border-white/10 text-slate-700 dark:text-zinc-300 hover:border-amaru-copper'
               }`}
             >
-              <span>FOLIO-8F1085AD</span>
-              <span className="text-[10px] bg-amber-600 text-white px-1.5 py-0.5 rounded-full font-sans font-medium">
-                Convenio EPP / Minero
+              <span className="font-semibold">{esOperador ? 'Mario Cárdenas' : 'FOLIO-8F1085AD'}</span>
+              <span className="text-[10px] bg-amber-600 text-white px-2 py-0.5 rounded-full font-medium">
+                Convenio Minero
               </span>
             </button>
 
             <button
               type="button"
               onClick={() => handleBuscar('FOLIO-2B4C8901')}
-              className={`text-xs px-2.5 py-1.5 rounded-lg border font-mono transition-all cursor-pointer flex items-center gap-1.5 ${
+              className={`text-xs px-3 py-1.5 rounded-xl border transition-all cursor-pointer flex items-center gap-2 ${
                 pedidoActual?.folio === 'FOLIO-2B4C8901'
-                  ? 'bg-sky-500/10 border-sky-500/40 text-sky-700 dark:text-sky-300 font-bold shadow-2xs'
-                  : 'bg-slate-50 dark:bg-black/30 border-slate-200 dark:border-white/10 text-slate-600 dark:text-zinc-400 hover:border-amaru-copper'
+                  ? 'bg-sky-500/15 border-sky-500/40 text-sky-800 dark:text-sky-200 font-bold shadow-xs'
+                  : 'bg-slate-50 dark:bg-black/30 border-slate-200 dark:border-white/10 text-slate-700 dark:text-zinc-300 hover:border-amaru-copper'
               }`}
             >
-              <span>FOLIO-2B4C8901</span>
-              <span className="text-[10px] bg-sky-600 text-white px-1.5 py-0.5 rounded-full font-sans font-medium">
-                Cliente Particular / Boutique
+              <span className="font-semibold">{esOperador ? 'Claudia Soto' : 'FOLIO-2B4C8901'}</span>
+              <span className="text-[10px] bg-sky-600 text-white px-2 py-0.5 rounded-full font-medium">
+                Cliente Particular
               </span>
             </button>
 
             <button
               type="button"
               onClick={() => handleBuscar('FOLIO-4D7E1123')}
-              className={`text-xs px-2.5 py-1.5 rounded-lg border font-mono transition-all cursor-pointer flex items-center gap-1.5 ${
+              className={`text-xs px-3 py-1.5 rounded-xl border transition-all cursor-pointer flex items-center gap-2 ${
                 pedidoActual?.folio === 'FOLIO-4D7E1123'
-                  ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-300 font-bold shadow-2xs'
-                  : 'bg-slate-50 dark:bg-black/30 border-slate-200 dark:border-white/10 text-slate-600 dark:text-zinc-400 hover:border-amaru-copper'
+                  ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-800 dark:text-emerald-200 font-bold shadow-xs'
+                  : 'bg-slate-50 dark:bg-black/30 border-slate-200 dark:border-white/10 text-slate-700 dark:text-zinc-300 hover:border-amaru-copper'
               }`}
             >
-              <span>FOLIO-4D7E1123</span>
-              <span className="text-[10px] bg-emerald-600 text-white px-1.5 py-0.5 rounded-full font-sans font-medium">
-                Convenio Salud / Isapre
+              <span className="font-semibold">{esOperador ? 'Roberto Morales' : 'FOLIO-4D7E1123'}</span>
+              <span className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded-full font-medium">
+                Convenio Salud
               </span>
             </button>
           </div>
@@ -1569,189 +1662,307 @@ export const SeguimientoCompraView: React.FC = () => {
         )
       ) : (
         <>
-          {/* ── 2. Tarjeta de Resumen del Pedido (Credencial / Pase Técnico Omnicanal) ── */}
-          <div
-            key={pedidoActual.folio}
-            className="card-zenith optical-sheen animate-stagger-1 rounded-2xl relative overflow-hidden transition-all duration-200"
-          >
-            {/* Franja superior metálica / cobriza con textura industrial */}
-            <div className="h-2.5 w-full bg-gradient-to-r from-[#7C3306] via-[#B34B0C] to-[#E27230] border-b border-amber-300/30" />
-
-            {/* Sub-header Contextual: Minero, Particular o Isapre */}
-            <div className="px-6 pt-3 pb-2 bg-slate-50/80 dark:bg-black/20 border-b border-slate-200/60 dark:border-white/5 flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono">
-              <div className="flex items-center gap-2">
-                <span className={`w-1.5 h-1.5 rounded-full ${pedidoActual.tieneAceleracionFiniquito ? 'bg-amber-500' : 'bg-amaru-copper'} animate-pulse`} />
-                <span className="font-bold tracking-widest uppercase text-amaru-copper dark:text-orange-400">
-                  {pedidoActual.tieneAceleracionFiniquito || pedidoActual.modeloArmazon.includes('DS 594')
-                    ? 'PASE TÉCNICO DE FAENA · PROTOCOLO DS N° 594'
-                    : pedidoActual.empresaEmpleadora.toLowerCase().includes('particular')
-                    ? 'COMPROBANTE CLÍNICO & BOUTIQUE · ÓPTICA AMARU'
-                    : 'CONVENIO INSTITUCIONAL & SALUD · ÓPTICA AMARU'}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 text-slate-400 dark:text-zinc-500">
-                <span>
-                  {pedidoActual.tieneAceleracionFiniquito || pedidoActual.modeloArmazon.includes('DS 594')
-                    ? 'SERIE: AMARU-IND-2026'
-                    : pedidoActual.empresaEmpleadora.toLowerCase().includes('particular')
-                    ? 'SERIE: AMARU-BOUTIQUE-2026'
-                    : 'SERIE: AMARU-SALUD-2026'}
-                </span>
-                <span>·</span>
-                <span>
-                  {pedidoActual.tieneAceleracionFiniquito || pedidoActual.modeloArmazon.includes('DS 594')
-                    ? 'HOMOLOGACIÓN SALUD OCUPACIONAL'
-                    : 'GARANTÍA DE ADAPTACIÓN ÓPTICA 100%'}
-                </span>
-              </div>
-            </div>
-
-            {/* Marcas de registro en las 4 esquinas (CAD Crosshairs) */}
-            <span className="absolute top-5 left-3 text-[11px] font-mono text-amaru-copper/50 select-none pointer-events-none">+</span>
-            <span className="absolute top-5 right-3 text-[11px] font-mono text-amaru-copper/50 select-none pointer-events-none">+</span>
-            <span className="absolute bottom-3 left-3 text-[11px] font-mono text-amaru-copper/50 select-none pointer-events-none">+</span>
-            <span className="absolute bottom-3 right-3 text-[11px] font-mono text-amaru-copper/50 select-none pointer-events-none">+</span>
-
-            <div className="p-6 relative">
-              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 flex-1">
-                  {/* Campo 1: Folio */}
-                  <div className="space-y-1">
-                    <span className="text-[11px] font-semibold text-slate-400 dark:text-zinc-500 uppercase tracking-wider block">
-                      Folio Único Trazable
+          {/* ── 2. Tarjeta de Resumen del Pedido (Vendedor Amigable vs Técnico Admin) ── */}
+          {esOperador ? (
+            <div
+              key={`vendedor-card-${pedidoActual.folio}`}
+              className="card-zenith optical-sheen animate-stagger-1 rounded-3xl p-6 sm:p-7 relative overflow-hidden transition-all duration-200 border border-slate-200/90 dark:border-white/10 shadow-sm"
+            >
+              {/* Cabecera del Resumen: Nombre del Cliente + Estado Actual */}
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-5 border-b border-slate-100 dark:border-white/5">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-amaru-copper">
+                      Folio: {pedidoActual.folio}
                     </span>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-base font-extrabold text-slate-900 dark:text-white tracking-tight">
-                        {pedidoActual.folio}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleCopiarHash(pedidoActual.folio)}
-                        title="Copiar Folio"
-                        className="text-slate-400 hover:text-amaru-copper p-1 rounded-md transition-colors cursor-pointer"
-                      >
-                        <Copy size={14} />
-                      </button>
-                    </div>
-                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 flex items-center gap-1 font-mono">
-                      <Calendar size={12} className="text-amaru-copper" /> {pedidoActual.fechaIngreso}
+                    <span className="text-slate-300 dark:text-zinc-600">·</span>
+                    <span className="text-[11px] font-medium text-slate-500 dark:text-zinc-400">
+                      Ingresado: {pedidoActual.fechaIngreso}
                     </span>
                   </div>
-
-                  {/* Campo 2: RUT y Nombre Paciente / Titular */}
-                  <div className="space-y-1">
-                    <span className="text-[11px] font-semibold text-slate-400 dark:text-zinc-500 uppercase tracking-wider block">
-                      RUT Paciente / Titular
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <User size={15} className="text-amaru-copper shrink-0" />
-                      <span className="font-mono font-bold text-sm text-slate-800 dark:text-zinc-200">
-                        {formatearRUT(pedidoActual.rutTitular)}
-                      </span>
-                    </div>
-                    <p className="text-xs font-medium text-slate-600 dark:text-zinc-300 truncate">
-                      {pedidoActual.nombreTitular}
-                    </p>
-                  </div>
-
-                  {/* Campo 3: Modalidad / Convenio */}
-                  <div className="space-y-1">
-                    <span className="text-[11px] font-semibold text-slate-400 dark:text-zinc-500 uppercase tracking-wider block">
-                      Modalidad / Convenio
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <Building2 size={15} className="text-sky-600 dark:text-sky-400 shrink-0" />
-                      <span className="font-semibold text-sm text-slate-800 dark:text-zinc-200 truncate">
-                        {pedidoActual.empresaEmpleadora}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-500 dark:text-zinc-400 truncate">
-                      {pedidoActual.sindicatoFaena}
-                    </p>
-                  </div>
-
-                  {/* Campo 4: Saldo Total */}
-                  <div className="space-y-1">
-                    <span className="text-[11px] font-semibold text-slate-400 dark:text-zinc-500 uppercase tracking-wider block">
-                      Saldo Total Pedido
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <DollarSign
-                        size={16}
-                        className={
-                          pedidoActual.tieneAceleracionFiniquito
-                            ? 'text-amber-500'
-                            : 'text-emerald-500'
-                        }
-                      />
-                      <span
-                        className={`text-lg font-extrabold tracking-tight font-mono ${
-                          pedidoActual.tieneAceleracionFiniquito
-                            ? 'text-amber-600 dark:text-amber-400'
-                            : 'text-slate-900 dark:text-white'
-                        }`}
-                      >
-                        {formatCLP(pedidoActual.saldoTotal)}
-                      </span>
-                    </div>
-                    <span
-                      className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full inline-block ${
-                        pedidoActual.tieneAceleracionFiniquito
-                          ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60'
-                          : 'bg-emerald-50 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-200'
-                      }`}
-                    >
-                      {pedidoActual.tieneAceleracionFiniquito
-                        ? 'Exigible en Finiquito'
-                        : 'Pago Confirmado'}
-                    </span>
-                  </div>
+                  <h3 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 dark:text-white">
+                    {pedidoActual.nombreTitular}
+                  </h3>
                 </div>
 
-                {/* Badge Estado General */}
-                <div className="flex lg:flex-col items-center lg:items-end justify-between border-t lg:border-t-0 pt-4 lg:pt-0 border-slate-100 dark:border-zinc-800/80">
-                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider hidden lg:block">
-                    Estado Trazable
-                  </span>
-                  <div
-                    className={`px-3 py-1.5 rounded-xl border text-xs font-bold tracking-wider uppercase flex items-center gap-2 ${
-                      pedidoActual.tieneAceleracionFiniquito
-                        ? 'bg-amber-500/10 border-amber-500/40 text-amber-700 dark:text-amber-300 shadow-2xs'
-                        : 'bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-300 shadow-2xs'
-                    }`}
-                  >
-                    <span
-                      className={`w-2 h-2 rounded-full ${
-                        pedidoActual.tieneAceleracionFiniquito
-                          ? 'bg-amber-500 animate-ping'
-                          : 'bg-emerald-500'
-                      }`}
-                    />
-                    <span>{pedidoActual.estadoBadge}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Modelo de Armazón Asignado */}
-              <div className="mt-5 pt-3.5 border-t border-slate-100 dark:border-white/5 flex items-center justify-between text-xs text-slate-600 dark:text-zinc-400">
                 <div className="flex items-center gap-2">
-                  <Sparkles size={14} className="text-amaru-copper shrink-0" />
-                  <span className="font-semibold text-slate-700 dark:text-zinc-300">
-                    Equipo / Modelo Óptico:
+                  <span className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold tracking-wider uppercase bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30 shadow-2xs">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span>{limpiarEstadoHumano(pedidoActual.estadoBadge)}</span>
                   </span>
-                  <span className="font-mono text-slate-900 dark:text-zinc-100">
+                </div>
+              </div>
+
+              {/* Grid de 4 Bloques: RUT, Teléfono, Sucursal, Armazón */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 py-5 border-b border-slate-100 dark:border-white/5">
+                {/* 1. RUT */}
+                <div className="space-y-1">
+                  <span className="text-[11px] font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">
+                    <User size={13} className="text-amaru-copper" />
+                    RUT del Paciente
+                  </span>
+                  <p className="font-mono text-base font-extrabold text-slate-800 dark:text-zinc-100">
+                    {formatearRUT(pedidoActual.rutTitular)}
+                  </p>
+                </div>
+
+                {/* 2. Teléfono / Contacto */}
+                <div className="space-y-1">
+                  <span className="text-[11px] font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">
+                    <Phone size={13} className="text-emerald-600 dark:text-emerald-400" />
+                    Teléfono / WhatsApp
+                  </span>
+                  <p className="font-mono text-sm font-bold text-slate-800 dark:text-zinc-100">
+                    +56 9 8586 0973
+                  </p>
+                </div>
+
+                {/* 3. Ciudad / Sucursal */}
+                <div className="space-y-1">
+                  <span className="text-[11px] font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">
+                    <MapPin size={13} className="text-amaru-copper" />
+                    Sucursal de Retiro
+                  </span>
+                  <p className="text-sm font-extrabold text-slate-800 dark:text-zinc-100">
+                    Sucursal {sucursalActiva || (pedidoActual.folio === 'FOLIO-8F1085AD' ? 'Calama' : 'Antofagasta')}
+                  </p>
+                </div>
+
+                {/* 4. Armazón Elegido */}
+                <div className="space-y-1">
+                  <span className="text-[11px] font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-wider flex items-center gap-1.5">
+                    <Sparkles size={13} className="text-amaru-copper" />
+                    Armazón Seleccionado
+                  </span>
+                  <p className="text-xs font-bold text-slate-800 dark:text-zinc-100 line-clamp-1">
+                    {pedidoActual.modeloArmazon.split('-')[0].trim()}
+                  </p>
+                  <span className="text-[11px] text-slate-500 dark:text-zinc-400 truncate block">
                     {pedidoActual.modeloArmazon}
                   </span>
                 </div>
-                <div className="hidden sm:flex items-center gap-1 font-mono text-[10px] text-slate-400">
-                  <span>CERTIFICACIÓN DE PRECISIÓN ÓPTICA</span>
+              </div>
+
+              {/* Acciones del Vendedor en Mesón */}
+              <div className="pt-5 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-zinc-400">
+                  <Building2 size={15} className="text-amaru-copper shrink-0" />
+                  <span>Modalidad: <strong className="text-slate-800 dark:text-zinc-200">{pedidoActual.empresaEmpleadora}</strong></span>
+                  <span>·</span>
+                  <span>Total: <strong className="text-slate-900 dark:text-white font-mono">{formatCLP(pedidoActual.saldoTotal)}</strong></span>
+                </div>
+
+                <div className="flex items-center gap-3 flex-wrap">
+                  {/* Acción Principal: Avisar al Cliente por WhatsApp */}
+                  <a
+                    href={`https://wa.me/56985860973?text=${encodeURIComponent(
+                      `Hola ${pedidoActual.nombreTitular}, te escribimos de Óptica Amaru Sucursal ${sucursalActiva || 'Calama'} para informarte sobre tus lentes (Folio ${pedidoActual.folio}): actualmente se encuentran en estado '${limpiarEstadoHumano(pedidoActual.estadoBadge)}'. Si tienes dudas o deseas coordinar tu retiro, avísanos por este medio.`
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-md shadow-emerald-600/20 cursor-pointer"
+                  >
+                    <WhatsAppIcon size={16} />
+                    <span>Avisar al Cliente por WhatsApp</span>
+                  </a>
+
+                  {/* Botón Secundario: Comprobante Entrega PDF */}
+                  <button
+                    type="button"
+                    onClick={() => handleDescargarComprobante(pedidoActual.folio)}
+                    disabled={descargandoPDF !== null}
+                    className="px-4 py-2.5 rounded-xl bg-white dark:bg-black/30 border border-slate-200 dark:border-white/10 hover:border-amaru-copper text-slate-700 dark:text-zinc-200 font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
+                  >
+                    <Download size={14} className="text-amaru-copper" />
+                    <span>{descargandoPDF === 'comprobante' ? 'Generando...' : 'Comprobante Entrega PDF'}</span>
+                  </button>
                 </div>
               </div>
             </div>
-          </div>
+          ) : (
+            <div
+              key={pedidoActual.folio}
+              className="card-zenith optical-sheen animate-stagger-1 rounded-2xl relative overflow-hidden transition-all duration-200"
+            >
+              {/* Franja superior metálica / cobriza con textura industrial */}
+              <div className="h-2.5 w-full bg-gradient-to-r from-[#7C3306] via-[#B34B0C] to-[#E27230] border-b border-amber-300/30" />
 
-          {/* ── 3. Alerta Destacada si existe Aceleración por Finiquito ── */}
-          {pedidoActual.tieneAceleracionFiniquito && (
+              {/* Sub-header Contextual: Minero, Particular o Isapre */}
+              <div className="px-6 pt-3 pb-2 bg-slate-50/80 dark:bg-black/20 border-b border-slate-200/60 dark:border-white/5 flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono">
+                <div className="flex items-center gap-2">
+                  <span className={`w-1.5 h-1.5 rounded-full ${pedidoActual.tieneAceleracionFiniquito ? 'bg-amber-500' : 'bg-amaru-copper'} animate-pulse`} />
+                  <span className="font-bold tracking-widest uppercase text-amaru-copper dark:text-orange-400">
+                    {pedidoActual.tieneAceleracionFiniquito || pedidoActual.modeloArmazon.includes('DS 594')
+                      ? 'PASE TÉCNICO DE FAENA · PROTOCOLO DS N° 594'
+                      : pedidoActual.empresaEmpleadora.toLowerCase().includes('particular')
+                      ? 'COMPROBANTE CLÍNICO & BOUTIQUE · ÓPTICA AMARU'
+                      : 'CONVENIO INSTITUCIONAL & SALUD · ÓPTICA AMARU'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-slate-400 dark:text-zinc-500">
+                  <span>
+                    {pedidoActual.tieneAceleracionFiniquito || pedidoActual.modeloArmazon.includes('DS 594')
+                      ? 'SERIE: AMARU-IND-2026'
+                      : pedidoActual.empresaEmpleadora.toLowerCase().includes('particular')
+                      ? 'SERIE: AMARU-BOUTIQUE-2026'
+                      : 'SERIE: AMARU-SALUD-2026'}
+                  </span>
+                  <span>·</span>
+                  <span>
+                    {pedidoActual.tieneAceleracionFiniquito || pedidoActual.modeloArmazon.includes('DS 594')
+                      ? 'HOMOLOGACIÓN SALUD OCUPACIONAL'
+                      : 'GARANTÍA DE ADAPTACIÓN ÓPTICA 100%'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Marcas de registro en las 4 esquinas (CAD Crosshairs) */}
+              <span className="absolute top-5 left-3 text-[11px] font-mono text-amaru-copper/50 select-none pointer-events-none">+</span>
+              <span className="absolute top-5 right-3 text-[11px] font-mono text-amaru-copper/50 select-none pointer-events-none">+</span>
+              <span className="absolute bottom-3 left-3 text-[11px] font-mono text-amaru-copper/50 select-none pointer-events-none">+</span>
+              <span className="absolute bottom-3 right-3 text-[11px] font-mono text-amaru-copper/50 select-none pointer-events-none">+</span>
+
+              <div className="p-6 relative">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 flex-1">
+                    {/* Campo 1: Folio */}
+                    <div className="space-y-1">
+                      <span className="text-[11px] font-semibold text-slate-400 dark:text-zinc-500 uppercase tracking-wider block">
+                        Folio Único Trazable
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-base font-extrabold text-slate-900 dark:text-white tracking-tight">
+                          {pedidoActual.folio}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleCopiarHash(pedidoActual.folio)}
+                          title="Copiar Folio"
+                          className="text-slate-400 hover:text-amaru-copper p-1 rounded-md transition-colors cursor-pointer"
+                        >
+                          <Copy size={14} />
+                        </button>
+                      </div>
+                      <span className="text-[11px] text-slate-500 dark:text-zinc-400 flex items-center gap-1 font-mono">
+                        <Calendar size={12} className="text-amaru-copper" /> {pedidoActual.fechaIngreso}
+                      </span>
+                    </div>
+
+                    {/* Campo 2: RUT y Nombre Paciente / Titular */}
+                    <div className="space-y-1">
+                      <span className="text-[11px] font-semibold text-slate-400 dark:text-zinc-500 uppercase tracking-wider block">
+                        RUT Paciente / Titular
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <User size={15} className="text-amaru-copper shrink-0" />
+                        <span className="font-mono font-bold text-sm text-slate-800 dark:text-zinc-200">
+                          {formatearRUT(pedidoActual.rutTitular)}
+                        </span>
+                      </div>
+                      <p className="text-xs font-medium text-slate-600 dark:text-zinc-300 truncate">
+                        {pedidoActual.nombreTitular}
+                      </p>
+                    </div>
+
+                    {/* Campo 3: Modalidad / Convenio */}
+                    <div className="space-y-1">
+                      <span className="text-[11px] font-semibold text-slate-400 dark:text-zinc-500 uppercase tracking-wider block">
+                        Modalidad / Convenio
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <Building2 size={15} className="text-sky-600 dark:text-sky-400 shrink-0" />
+                        <span className="font-semibold text-sm text-slate-800 dark:text-zinc-200 truncate">
+                          {pedidoActual.empresaEmpleadora}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-zinc-400 truncate">
+                        {pedidoActual.sindicatoFaena}
+                      </p>
+                    </div>
+
+                    {/* Campo 4: Saldo Total */}
+                    <div className="space-y-1">
+                      <span className="text-[11px] font-semibold text-slate-400 dark:text-zinc-500 uppercase tracking-wider block">
+                        Saldo Total Pedido
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <DollarSign
+                          size={16}
+                          className={
+                            pedidoActual.tieneAceleracionFiniquito
+                              ? 'text-amber-500'
+                              : 'text-emerald-500'
+                          }
+                        />
+                        <span
+                          className={`text-lg font-extrabold tracking-tight font-mono ${
+                            pedidoActual.tieneAceleracionFiniquito
+                              ? 'text-amber-600 dark:text-amber-400'
+                              : 'text-slate-900 dark:text-white'
+                          }`}
+                        >
+                          {formatCLP(pedidoActual.saldoTotal)}
+                        </span>
+                      </div>
+                      <span
+                        className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full inline-block ${
+                          pedidoActual.tieneAceleracionFiniquito
+                            ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60'
+                            : 'bg-emerald-50 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-200'
+                        }`}
+                      >
+                        {pedidoActual.tieneAceleracionFiniquito
+                          ? 'Exigible en Finiquito'
+                          : 'Pago Confirmado'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Badge Estado General */}
+                  <div className="flex lg:flex-col items-center lg:items-end justify-between border-t lg:border-t-0 pt-4 lg:pt-0 border-slate-100 dark:border-zinc-800/80">
+                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider hidden lg:block">
+                      Estado Trazable
+                    </span>
+                    <div
+                      className={`px-3 py-1.5 rounded-xl border text-xs font-bold tracking-wider uppercase flex items-center gap-2 ${
+                        pedidoActual.tieneAceleracionFiniquito
+                          ? 'bg-amber-500/10 border-amber-500/40 text-amber-700 dark:text-amber-300 shadow-2xs'
+                          : 'bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-300 shadow-2xs'
+                      }`}
+                    >
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          pedidoActual.tieneAceleracionFiniquito
+                            ? 'bg-amber-500 animate-ping'
+                            : 'bg-emerald-500'
+                        }`}
+                      />
+                      <span>{limpiarEstadoHumano(pedidoActual.estadoBadge)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Modelo de Armazón Asignado */}
+                <div className="mt-5 pt-3.5 border-t border-slate-100 dark:border-white/5 flex items-center justify-between text-xs text-slate-600 dark:text-zinc-400">
+                  <div className="flex items-center gap-2">
+                    <Sparkles size={14} className="text-amaru-copper shrink-0" />
+                    <span className="font-semibold text-slate-700 dark:text-zinc-300">
+                      Equipo / Modelo Óptico:
+                    </span>
+                    <span className="font-mono text-slate-900 dark:text-zinc-100">
+                      {pedidoActual.modeloArmazon}
+                    </span>
+                  </div>
+                  <div className="hidden sm:flex items-center gap-1 font-mono text-[10px] text-slate-400">
+                    <span>CERTIFICACIÓN DE PRECISIÓN ÓPTICA</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── 3. Alerta Destacada si existe Aceleración por Finiquito (Solo Finanzas/Admin) ── */}
+          {!esOperador && pedidoActual.tieneAceleracionFiniquito && (
             <div className="bg-amber-50/90 dark:bg-[#251D14] border-l-4 border-amber-500 border-y border-r border-amber-200 dark:border-amber-900/60 rounded-2xl p-5 shadow-xs">
               <div className="flex items-start gap-4">
                 <div className="p-2.5 bg-amber-500/15 text-amber-600 dark:text-amber-400 rounded-xl shrink-0">
@@ -1794,172 +2005,418 @@ export const SeguimientoCompraView: React.FC = () => {
             </div>
           )}
 
-          {/* ── 4. Línea de Tiempo (Stepper) Vertical Omnicanal ── */}
-          <div key={`stepper-${pedidoActual.folio}`} className="card-zenith animate-stagger-2 rounded-2xl p-6 sm:p-8">
-            <div className="mb-6 flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-extrabold tracking-tight text-slate-900 dark:text-white">
-                  Hitos de Trazabilidad del Pedido
-                </h3>
-                <p className="text-xs text-slate-500 dark:text-zinc-400">
-                  Evolución cronológica desde la validación clínica hasta la entrega certificada al paciente.
-                </p>
-              </div>
-              <span className="text-xs font-mono font-semibold px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-white/[0.05] border border-slate-200/60 dark:border-white/10 text-slate-600 dark:text-zinc-400">
-                {pedidoActual.hitos.filter(h => h.estado === 'completed').length} / {pedidoActual.hitos.length} Hitos Completados
-              </span>
-            </div>
+          {/* ── 4. Línea de Tiempo (Stepper): Vendedor Acreditado vs Técnico ── */}
+          {esOperador ? (
+            (() => {
+              const paso2Acreditado = !pedidoActual.estadoBadge.includes('LABORATORIO') && pedidoActual.folio !== 'FOLIO-2B4C8901';
+              const paso3Acreditado = Boolean(llegadasAcreditadas[pedidoActual.folio]) || (pedidoActual.folio === 'FOLIO-8F1085AD') || (!pedidoActual.estadoBadge.includes('LABORATORIO') && !pedidoActual.estadoBadge.includes('DESPACHO') && pedidoActual.folio !== 'FOLIO-2B4C8901' && pedidoActual.folio !== 'FOLIO-4D7E1123');
+              const paso3EnTransito = !paso3Acreditado && (pedidoActual.estadoBadge.includes('DESPACHO') || pedidoActual.folio === 'FOLIO-4D7E1123');
+              const paso4Acreditado = (pedidoActual.hitos.find(h => h.id === 'hito-entrega')?.estado === 'completed') && (pedidoActual.folio === 'FOLIO-8F1085AD');
 
-            {/* Contenedor del Stepper Vertical */}
-            <div className="relative pl-2 sm:pl-4 space-y-8">
-              {pedidoActual.hitos.map((hito, index) => {
-                const isLast = index === pedidoActual.hitos.length - 1;
-                const colors = getBadgeColors(hito.estado);
+              const totalAcreditados = 1 + (paso2Acreditado ? 1 : 0) + (paso3Acreditado ? 1 : 0) + (paso4Acreditado ? 1 : 0);
 
-                return (
-                  <div key={hito.id} className="relative flex items-start group">
-                    {/* Línea conectora vertical entre nodos con animación de llenado */}
-                    {!isLast && (
-                      <div
-                        className={`timeline-line-fill absolute left-[19px] top-[40px] bottom-[-32px] w-[3px] transition-colors ${
-                          hito.estado === 'completed'
-                            ? 'bg-emerald-500 dark:bg-emerald-600'
-                            : 'bg-slate-200 dark:bg-zinc-800'
-                        }`}
-                      />
-                    )}
-
-                    {/* Nodo Circular con Icono */}
-                    <div
-                      className={`relative z-10 w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 ${colors.nodeBg}`}
-                    >
-                      {renderIconoHito(hito)}
+              return (
+                <div key={`stepper-vendedor-${pedidoActual.folio}`} className="card-zenith animate-stagger-2 rounded-3xl p-6 sm:p-7 space-y-6 border border-slate-200/90 dark:border-white/10 shadow-sm">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-4 border-b border-slate-100 dark:border-white/5">
+                    <div>
+                      <h3 className="text-xl font-black tracking-tight text-slate-900 dark:text-white">
+                        Progreso del Pedido (Atención al Cliente)
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-zinc-400">
+                        4 pasos acreditados para informar al paciente y verificar disponibilidad en tienda.
+                      </p>
                     </div>
+                    <span className="text-xs font-bold px-3 py-1 rounded-xl bg-slate-100 dark:bg-white/[0.05] border border-slate-200/60 dark:border-white/10 text-slate-600 dark:text-zinc-300 w-fit">
+                      {totalAcreditados} de 4 Pasos Acreditados
+                    </span>
+                  </div>
 
-                    {/* Contenido descriptivo del Hito */}
-                    <div className="ml-5 flex-1 bg-slate-50/70 dark:bg-[#24211F]/60 border border-slate-200/70 dark:border-zinc-800/80 rounded-2xl p-5 hover:border-slate-300 dark:hover:border-zinc-700 transition-all">
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h4 className={`text-sm ${colors.titleColor}`}>
-                            {hito.nombre}
-                          </h4>
-                          <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider ${colors.pillBg}`}
-                          >
-                            {hito.subtitulo}
+                  {/* 4 Pasos Acreditados y Numerados */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {/* PASO 1: Receta Validada */}
+                    <div className="rounded-2xl p-4.5 border transition-all flex flex-col justify-between relative overflow-hidden bg-emerald-50/70 dark:bg-emerald-950/20 border-emerald-500/30 text-emerald-900 dark:text-emerald-100 shadow-2xs">
+                      <div className="space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-black bg-emerald-500 text-white shadow-2xs">
+                            ✓
+                          </span>
+                          <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                            PASO 1 · ACREDITADO ✓
                           </span>
                         </div>
-                        {hito.fecha && (
-                          <span className="text-[11px] font-mono text-slate-400 dark:text-zinc-500 flex items-center gap-1">
-                            <Clock size={12} />
-                            {hito.fecha}
+                        <div>
+                          <h4 className="text-sm font-extrabold text-slate-900 dark:text-white">
+                            Receta Validada
+                          </h4>
+                          <p className="text-[11px] font-medium text-amaru-copper dark:text-orange-400">
+                            Graduación Aprobada
+                          </p>
+                          <p className="text-xs text-slate-600 dark:text-zinc-400 mt-1 leading-relaxed">
+                            Graduación óptica y parámetros clínicos visados por especialista.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-4 pt-3 border-t border-emerald-500/15 flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                        <ShieldCheck size={14} className="shrink-0" />
+                        <span className="truncate">Acreditado por Óptico Clínico · Aprobado</span>
+                      </div>
+                    </div>
+
+                    {/* PASO 2: En Laboratorio Óptico */}
+                    <div className={`rounded-2xl p-4.5 border transition-all flex flex-col justify-between relative overflow-hidden shadow-2xs ${
+                      paso2Acreditado
+                        ? 'bg-emerald-50/70 dark:bg-emerald-950/20 border-emerald-500/30 text-emerald-900 dark:text-emerald-100'
+                        : 'bg-amber-50/70 dark:bg-amber-950/20 border-amber-500/40 text-amber-900 dark:text-amber-100 ring-2 ring-amber-500/20'
+                    }`}>
+                      <div className="space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black shadow-2xs ${
+                            paso2Acreditado ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white animate-pulse'
+                          }`}>
+                            {paso2Acreditado ? '✓' : '2'}
                           </span>
+                          <span className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${
+                            paso2Acreditado
+                              ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
+                              : 'bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/30'
+                          }`}>
+                            {paso2Acreditado ? 'PASO 2 · ACREDITADO ✓' : 'PASO 2 · EN LABORATORIO'}
+                          </span>
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-extrabold text-slate-900 dark:text-white">
+                            En Laboratorio Óptico
+                          </h4>
+                          <p className="text-[11px] font-medium text-amaru-copper dark:text-orange-400">
+                            {paso2Acreditado ? 'Montaje y Biselado Concluido' : 'Montaje en Proceso'}
+                          </p>
+                          <p className="text-xs text-slate-600 dark:text-zinc-400 mt-1 leading-relaxed">
+                            {paso2Acreditado
+                              ? 'Cristales tallados y biselados con estándar de calidad ISO 9001.'
+                              : 'Cristales de alta precisión en tallado y biselado robótico.'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className={`mt-4 pt-3 border-t flex items-center gap-1.5 text-[11px] font-semibold ${
+                        paso2Acreditado
+                          ? 'border-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                          : 'border-amber-500/15 text-amber-700 dark:text-amber-400'
+                      }`}>
+                        {paso2Acreditado ? (
+                          <>
+                            <CheckCircle2 size={14} className="shrink-0" />
+                            <span className="truncate">Biselado y control de calidad aprobado</span>
+                          </>
+                        ) : (
+                          <>
+                            <Clock size={14} className="shrink-0 animate-spin" />
+                            <span className="truncate">Control de Calidad ISO 9001 en curso</span>
+                          </>
                         )}
                       </div>
+                    </div>
 
-                      <p className="text-xs text-slate-600 dark:text-zinc-300 leading-relaxed mb-3">
-                        {hito.descripcion}
-                      </p>
+                    {/* PASO 3: Recepción en Sucursal / Llegada a Tienda */}
+                    <div className={`rounded-2xl p-4.5 border transition-all flex flex-col justify-between relative overflow-hidden shadow-2xs ${
+                      paso3Acreditado
+                        ? 'bg-emerald-50/70 dark:bg-emerald-950/20 border-emerald-500/30 text-emerald-900 dark:text-emerald-100'
+                        : paso3EnTransito
+                        ? 'bg-amber-50/70 dark:bg-amber-950/20 border-amber-500/40 text-amber-900 dark:text-amber-100 ring-2 ring-amber-500/20'
+                        : 'bg-slate-50/60 dark:bg-black/20 border-slate-200 dark:border-white/5 text-slate-600 dark:text-zinc-400 opacity-70'
+                    }`}>
+                      <div className="space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black shadow-2xs ${
+                            paso3Acreditado
+                              ? 'bg-emerald-500 text-white'
+                              : paso3EnTransito
+                              ? 'bg-amber-500 text-white'
+                              : 'bg-slate-200 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400'
+                          }`}>
+                            {paso3Acreditado ? '✓' : '3'}
+                          </span>
+                          <span className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${
+                            paso3Acreditado
+                              ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
+                              : paso3EnTransito
+                              ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/30'
+                              : 'bg-slate-200 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 border-slate-300 dark:border-zinc-700'
+                          }`}>
+                            {paso3Acreditado
+                              ? 'PASO 3 · ACREDITADO ✓'
+                              : paso3EnTransito
+                              ? 'PASO 3 · EN TRÁNSITO'
+                              : 'PASO 3 · PENDIENTE'}
+                          </span>
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-extrabold text-slate-900 dark:text-white">
+                            Recepción en Sucursal
+                          </h4>
+                          <p className="text-[11px] font-medium text-amaru-copper dark:text-orange-400">
+                            Sucursal {sucursalActiva || 'Calama'}
+                          </p>
+                          <p className="text-xs text-slate-600 dark:text-zinc-400 mt-1 leading-relaxed">
+                            {paso3Acreditado
+                              ? `Lentes recepcionados físicamente en Sucursal ${sucursalActiva || 'Calama'}.`
+                              : paso3EnTransito
+                              ? `Valija óptica en camino a Sucursal ${sucursalActiva || 'Calama'}.`
+                              : 'A la espera de despacho desde laboratorio óptico.'}
+                          </p>
+                        </div>
+                      </div>
 
-                      {/* Detalles adicionales específicos por hito */}
+                      {paso3Acreditado ? (
+                        <div className="mt-4 pt-3 border-t border-emerald-500/15 flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                          <CheckCircle2 size={14} className="shrink-0" />
+                          <span className="truncate">Recibido en Sucursal {sucursalActiva || 'Calama'} por Vendedor</span>
+                        </div>
+                      ) : paso3EnTransito ? (
+                        <div className="mt-4 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => handleAcreditarLlegada(pedidoActual.folio)}
+                            className="w-full py-2 px-3 text-xs font-bold rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-95 text-white flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                          >
+                            <PackageCheck size={14} />
+                            <span>Acreditar Llegada a Tienda</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="mt-4 pt-3 border-t border-slate-200 dark:border-white/5 flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-zinc-400">
+                          <Clock size={14} className="shrink-0" />
+                          <span className="truncate">Pendiente de despacho a tienda</span>
+                        </div>
+                      )}
+                    </div>
 
-                      {/* Sello SHA-256 en Entrega DS 594: Terminal Forense Oscura */}
-                      {hito.selloSha256 && (
-                        <div className="mt-3 bg-zinc-950 border border-emerald-500/30 rounded-xl p-3.5 space-y-2.5 shadow-lg shadow-black/40">
-                          {/* Terminal prompt header */}
-                          <div className="flex items-center justify-between border-b border-emerald-500/20 pb-2">
-                            <div className="flex items-center gap-2">
-                              <div className="flex gap-1.5">
-                                <span className="w-2.5 h-2.5 rounded-full bg-red-500/80 inline-block" />
-                                <span className="w-2.5 h-2.5 rounded-full bg-amber-500/80 inline-block" />
-                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/80 inline-block" />
+                    {/* PASO 4: Entrega Final al Paciente */}
+                    <div className={`rounded-2xl p-4.5 border transition-all flex flex-col justify-between relative overflow-hidden shadow-2xs ${
+                      paso4Acreditado
+                        ? 'bg-emerald-50/70 dark:bg-emerald-950/20 border-emerald-500/30 text-emerald-900 dark:text-emerald-100'
+                        : 'bg-white dark:bg-[#1E1C1A] border-amaru-copper/30 dark:border-amaru-copper/40 text-slate-800 dark:text-zinc-100 ring-1 ring-amaru-copper/20'
+                    }`}>
+                      <div className="space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black shadow-2xs ${
+                            paso4Acreditado
+                              ? 'bg-emerald-500 text-white'
+                              : 'bg-amaru-copper text-white'
+                          }`}>
+                            {paso4Acreditado ? '✓' : '4'}
+                          </span>
+                          <span className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${
+                            paso4Acreditado
+                              ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
+                              : 'bg-amaru-copper/15 text-amaru-copper dark:text-amber-400 border-amaru-copper/30 font-bold'
+                          }`}>
+                            {paso4Acreditado ? 'PASO 4 · ACREDITADO ✓' : 'PASO 4 · PENDIENTE'}
+                          </span>
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-extrabold text-slate-900 dark:text-white">
+                            Entrega Final al Paciente
+                          </h4>
+                          <p className="text-[11px] font-medium text-amaru-copper dark:text-orange-400">
+                            {paso4Acreditado ? 'Conformidad de Entrega Registrada' : 'Listo para Entrega en Tienda'}
+                          </p>
+                          <p className="text-xs text-slate-600 dark:text-zinc-400 mt-1 leading-relaxed">
+                            {paso4Acreditado
+                              ? 'Recepción conforme registrada y firmada en tienda.'
+                              : 'Esperando retiro del titular o tercero autorizado en mesón.'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {paso4Acreditado ? (
+                        <div className="mt-4 pt-3 border-t border-emerald-500/15 flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                          <CheckCircle2 size={14} className="shrink-0" />
+                          <span className="truncate">Entrega conforme acreditada · Firma registrada</span>
+                        </div>
+                      ) : (
+                        <div className="mt-4 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => handleIrAEntregar(pedidoActual.folio)}
+                            className="w-full py-2 px-3 text-xs font-bold rounded-xl bg-gradient-to-r from-amaru-copper to-amaru-earth hover:brightness-105 active:scale-95 text-white flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                          >
+                            <span>Ir a Entregar Pedido</span>
+                            <ArrowRight size={14} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()
+          ) : (
+            <div key={`stepper-${pedidoActual.folio}`} className="card-zenith animate-stagger-2 rounded-2xl p-6 sm:p-8">
+              <div className="mb-6 flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-extrabold tracking-tight text-slate-900 dark:text-white">
+                    Hitos de Trazabilidad del Pedido
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400">
+                    Evolución cronológica desde la validación clínica hasta la entrega certificada al paciente.
+                  </p>
+                </div>
+                <span className="text-xs font-mono font-semibold px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-white/[0.05] border border-slate-200/60 dark:border-white/10 text-slate-600 dark:text-zinc-400">
+                  {pedidoActual.hitos.filter(h => h.estado === 'completed').length} / {pedidoActual.hitos.length} Hitos Completados
+                </span>
+              </div>
+
+              {/* Contenedor del Stepper Vertical */}
+              <div className="relative pl-2 sm:pl-4 space-y-8">
+                {pedidoActual.hitos.map((hito, index) => {
+                  const isLast = index === pedidoActual.hitos.length - 1;
+                  const colors = getBadgeColors(hito.estado);
+
+                  return (
+                    <div key={hito.id} className="relative flex items-start group">
+                      {/* Línea conectora vertical entre nodos con animación de llenado */}
+                      {!isLast && (
+                        <div
+                          className={`timeline-line-fill absolute left-[19px] top-[40px] bottom-[-32px] w-[3px] transition-colors ${
+                            hito.estado === 'completed'
+                              ? 'bg-emerald-500 dark:bg-emerald-600'
+                              : 'bg-slate-200 dark:bg-zinc-800'
+                          }`}
+                        />
+                      )}
+
+                      {/* Nodo Circular con Icono */}
+                      <div
+                        className={`relative z-10 w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-transform group-hover:scale-105 ${colors.nodeBg}`}
+                      >
+                        {renderIconoHito(hito)}
+                      </div>
+
+                      {/* Contenido descriptivo del Hito */}
+                      <div className="ml-5 flex-1 bg-slate-50/70 dark:bg-[#24211F]/60 border border-slate-200/70 dark:border-zinc-800/80 rounded-2xl p-5 hover:border-slate-300 dark:hover:border-zinc-700 transition-all">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h4 className={`text-sm ${colors.titleColor}`}>
+                              {hito.nombre}
+                            </h4>
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider ${colors.pillBg}`}
+                            >
+                              {hito.subtitulo}
+                            </span>
+                          </div>
+                          {hito.fecha && (
+                            <span className="text-[11px] font-mono text-slate-400 dark:text-zinc-500 flex items-center gap-1">
+                              <Clock size={12} />
+                              {hito.fecha}
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="text-xs text-slate-600 dark:text-zinc-300 leading-relaxed mb-3">
+                          {hito.descripcion}
+                        </p>
+
+                        {/* Detalles adicionales específicos por hito */}
+
+                        {/* Sello SHA-256 en Entrega DS 594: Terminal Forense Oscura */}
+                        {hito.selloSha256 && (
+                          <div className="mt-3 bg-zinc-950 border border-emerald-500/30 rounded-xl p-3.5 space-y-2.5 shadow-lg shadow-black/40">
+                            {/* Terminal prompt header */}
+                            <div className="flex items-center justify-between border-b border-emerald-500/20 pb-2">
+                              <div className="flex items-center gap-2">
+                                <div className="flex gap-1.5">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-red-500/80 inline-block" />
+                                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500/80 inline-block" />
+                                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/80 inline-block" />
+                                </div>
+                                <span className="text-[10px] font-mono text-emerald-400/90 font-bold tracking-wider flex items-center gap-1.5 pl-1">
+                                  <ShieldCheck size={13} className="text-emerald-400" />
+                                  AUDITORÍA FORENSE · SELLO INMUTABLE SHA-256
+                                </span>
                               </div>
-                              <span className="text-[10px] font-mono text-emerald-400/90 font-bold tracking-wider flex items-center gap-1.5 pl-1">
-                                <ShieldCheck size={13} className="text-emerald-400" />
-                                AUDITORÍA FORENSE · SELLO INMUTABLE SHA-256
+                              <button
+                                type="button"
+                                onClick={() => handleCopiarHash(hito.selloSha256!)}
+                                className="text-[11px] font-mono font-medium text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer transition-colors bg-emerald-950/60 hover:bg-emerald-900/60 px-2 py-0.5 rounded-md border border-emerald-500/30"
+                              >
+                                {hashCopiado ? (
+                                  <>
+                                    <Check size={11} className="text-emerald-300" />
+                                    <span className="text-emerald-300 font-bold">COPIADO</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy size={11} />
+                                    <span>COPIAR</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+
+                            {/* Hash output */}
+                            <div className="p-2.5 bg-black/60 rounded-lg border border-emerald-500/20 font-mono text-xs">
+                              <div className="text-[10px] text-emerald-500/60 select-none pb-1">
+                                root@amaru-audit:~# sha256sum acta_recepcion_ds594.pdf
+                              </div>
+                              <code className="text-emerald-400 break-all select-all block font-bold tracking-wider">
+                                {hito.selloSha256}
+                              </code>
+                            </div>
+
+                            <div className="flex flex-wrap items-center justify-between text-[11px] text-zinc-400 font-mono pt-1">
+                              <span>
+                                Receptor Titular: <strong className="text-zinc-200">{hito.detalles?.receptor}</strong> ({hito.detalles?.tipoReceptor})
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleDescargarComprobante(pedidoActual.folio)}
+                                disabled={descargandoPDF !== null}
+                                className="text-amber-400 hover:text-amber-300 hover:underline font-semibold flex items-center gap-1 cursor-pointer"
+                              >
+                                <Download size={12} />
+                                <span>Descargar Acta Certificada DS 594</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Detalle si es el hito financiero y está en alerta */}
+                        {hito.tipoIcono === 'finanzas' && hito.estado === 'alert' && hito.detalles?.saldoAcelerado && (
+                          <div className="mt-3 p-3 bg-amber-50/70 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800/60 rounded-xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                            <div className="space-y-0.5">
+                              <span className="text-xs font-bold text-amber-900 dark:text-amber-200 block">
+                                Monto Acelerado en Liquidación: {formatCLP(hito.detalles.saldoAcelerado)}
+                              </span>
+                              <span className="text-[11px] text-amber-700 dark:text-amber-400">
+                                {hito.detalles.cuotasAfectadas} cuotas consolidadas. Código del Trabajo Art. 177.
                               </span>
                             </div>
                             <button
                               type="button"
-                              onClick={() => handleCopiarHash(hito.selloSha256!)}
-                              className="text-[11px] font-mono font-medium text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer transition-colors bg-emerald-950/60 hover:bg-emerald-900/60 px-2 py-0.5 rounded-md border border-emerald-500/30"
-                            >
-                              {hashCopiado ? (
-                                <>
-                                  <Check size={11} className="text-emerald-300" />
-                                  <span className="text-emerald-300 font-bold">COPIADO</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Copy size={11} />
-                                  <span>COPIAR</span>
-                                </>
-                              )}
-                            </button>
-                          </div>
-
-                          {/* Hash output */}
-                          <div className="p-2.5 bg-black/60 rounded-lg border border-emerald-500/20 font-mono text-xs">
-                            <div className="text-[10px] text-emerald-500/60 select-none pb-1">
-                              root@amaru-audit:~# sha256sum acta_recepcion_ds594.pdf
-                            </div>
-                            <code className="text-emerald-400 break-all select-all block font-bold tracking-wider">
-                              {hito.selloSha256}
-                            </code>
-                          </div>
-
-                          <div className="flex flex-wrap items-center justify-between text-[11px] text-zinc-400 font-mono pt-1">
-                            <span>
-                              Receptor Titular: <strong className="text-zinc-200">{hito.detalles?.receptor}</strong> ({hito.detalles?.tipoReceptor})
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => handleDescargarComprobante(pedidoActual.folio)}
+                              onClick={() => handleDescargarFiniquito(pedidoActual.folio)}
                               disabled={descargandoPDF !== null}
-                              className="text-amber-400 hover:text-amber-300 hover:underline font-semibold flex items-center gap-1 cursor-pointer"
+                              className="px-2.5 py-1.5 text-xs bg-amber-600 hover:bg-amber-700 text-white font-medium rounded-lg transition-colors cursor-pointer shrink-0 flex items-center gap-1"
                             >
-                              <Download size={12} />
-                              <span>Descargar Acta Certificada DS 594</span>
+                              <ExternalLink size={12} />
+                              <span>Ver Documento Legal</span>
                             </button>
                           </div>
-                        </div>
-                      )}
+                        )}
 
-                      {/* Detalle si es el hito financiero y está en alerta */}
-                      {hito.tipoIcono === 'finanzas' && hito.estado === 'alert' && hito.detalles?.saldoAcelerado && (
-                        <div className="mt-3 p-3 bg-amber-50/70 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800/60 rounded-xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                          <div className="space-y-0.5">
-                            <span className="text-xs font-bold text-amber-900 dark:text-amber-200 block">
-                              Monto Acelerado en Liquidación: {formatCLP(hito.detalles.saldoAcelerado)}
-                            </span>
-                            <span className="text-[11px] text-amber-700 dark:text-amber-400">
-                              {hito.detalles.cuotasAfectadas} cuotas consolidadas. Código del Trabajo Art. 177.
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleDescargarFiniquito(pedidoActual.folio)}
-                            disabled={descargandoPDF !== null}
-                            className="px-2.5 py-1.5 text-xs bg-amber-600 hover:bg-amber-700 text-white font-medium rounded-lg transition-colors cursor-pointer shrink-0 flex items-center gap-1"
-                          >
-                            <ExternalLink size={12} />
-                            <span>Ver Documento Legal</span>
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Observaciones técnicas si existen */}
-                      {hito.detalles?.observacionLegal && !hito.selloSha256 && (
-                        <p className="mt-2 text-[11px] text-slate-500 dark:text-zinc-400 italic">
-                          ℹ {hito.detalles.observacionLegal}
-                        </p>
-                      )}
+                        {/* Observaciones técnicas si existen */}
+                        {hito.detalles?.observacionLegal && !hito.selloSha256 && (
+                          <p className="mt-2 text-[11px] text-slate-500 dark:text-zinc-400 italic">
+                            ℹ {hito.detalles.observacionLegal}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
         </>
       )}
 

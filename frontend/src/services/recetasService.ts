@@ -27,6 +27,9 @@ export interface SolicitudReceta {
   fecha: string;
   estado: EstadoSolicitudReceta;
   motivoObservacion?: string;
+  origen?: 'PORTAL_PACIENTE' | 'QR_PUBLICO' | 'MESON' | string;
+  tipoSolicitud?: string;
+  consentimientoLey21719?: boolean;
 }
 
 export const SOLICITUD_DEMO_INICIAL: SolicitudReceta = {
