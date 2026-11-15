@@ -10,6 +10,9 @@ import {
   CheckCircle2,
   AlertCircle,
   PackageCheck,
+  TrendingUp,
+  Clock,
+  BookOpen,
 } from 'lucide-react';
 import {
   getInventario,
@@ -18,7 +21,7 @@ import {
   registrarIngresoStock,
   type ItemInventario,
 } from '../services/inventarioService';
-import { getUserInfo } from '../utils/auth';
+import { getUserInfo, isUserAdmin } from '../utils/auth';
 import {
   TitanioProIcon,
   AcetatoLumiereIcon,
@@ -28,10 +31,80 @@ import {
 export const InventarioView: React.FC = () => {
   const navigate = useNavigate();
   const userInfo = getUserInfo();
+  const isAdmin = isUserAdmin();
   const nombreOperador = (
     localStorage.getItem('amaru_nombre_vendedor') ||
     (userInfo.username === '17456789-2' ? 'JUANITA ARAYA' : 'CARLOS ROJAS MORALES')
   ).toUpperCase();
+
+  // Costos confidenciales de proveedor (solo para ADMINISTRADOR)
+  const COSTOS_ADMIN: Record<string, { costo: number }> = {
+    // Los 6 modelos oficiales del catálogo
+    'EPP-TITAN-001': { costo: 24000 },
+    'BOUT-ACET-002': { costo: 20500 },
+    'FLEX-STEEL-003': { costo: 18200 },
+    'BOUT-METRO-004': { costo: 25000 },
+    'EPP-VULC-005': { costo: 22000 },
+    'FLEX-AERO-006': { costo: 27500 },
+    // Mapeos adicionales por SKU secundario
+    'AMARU-LUMIERE-04': { costo: 20500 },
+    'AMARU-FLEX-07': { costo: 18200 },
+    'EPP-ULTRA-003': { costo: 15000 },
+    'EPP-SHIELD-002': { costo: 22000 },
+    'AMARU-PROGRES-01': { costo: 28500 },
+  };
+
+  interface MovimientoKardex {
+    fechaHoraExacta?: string;
+    fecha?: string;
+    responsable?: string;
+    operador?: string;
+    tipo?: string;
+    guia?: string;
+    numeroGuia?: string;
+    descripcion?: string;
+    sucursal?: string;
+    modelo?: string;
+    sku?: string;
+    cantidad?: number;
+  }
+
+  // Registros iniciales de Kardex para demo (si no hay datos en localStorage)
+  const KARDEX_DEMO_INICIAL: MovimientoKardex[] = [
+    {
+      fechaHoraExacta: '14/11/2026 · 17:30:22 hrs',
+      responsable: 'Juanita Araya (Vendedor)',
+      tipo: 'Ingreso',
+      guia: 'GD-45892',
+      descripcion: 'Ingreso Guía N° GD-45892',
+      sucursal: 'Calama',
+      modelo: 'Titanium Shield Pro',
+      sku: 'EPP-TITAN-001',
+      cantidad: 12,
+    },
+    {
+      fechaHoraExacta: '13/11/2026 · 10:15:08 hrs',
+      responsable: 'Administración',
+      tipo: 'Ingreso',
+      guia: 'FAC-88301',
+      descripcion: 'Ingreso Factura N° FAC-88301',
+      sucursal: 'Antofagasta',
+      modelo: 'Lumière Acetato Italiano',
+      sku: 'AMARU-LUMIERE-04',
+      cantidad: 8,
+    },
+    {
+      fechaHoraExacta: '12/11/2026 · 09:45:33 hrs',
+      responsable: 'Carlos Rojas (Vendedor)',
+      tipo: 'Descuento',
+      guia: 'FOLIO-9E8821F0',
+      descripcion: 'Descuento por Venta FOLIO-9E8821F0',
+      sucursal: 'Antofagasta',
+      modelo: 'Ultralight Flex Titanio',
+      sku: 'AMARU-FLEX-07',
+      cantidad: -2,
+    },
+  ];
 
   const [inventario, setInventario] = useState<ItemInventario[]>(() => getInventario());
   const [sucursalActual, setSucursalActual] = useState<'Calama' | 'Antofagasta'>(() => getSucursalActiva());
@@ -346,6 +419,31 @@ export const InventarioView: React.FC = () => {
                       CLP
                     </span>
                   </div>
+                  {/* Banda Exclusiva de Gerencia: Costo y Margen (solo ADMINISTRADOR) */}
+                  {isAdmin && (
+                    (() => {
+                      const costo = COSTOS_ADMIN[item.sku]?.costo ?? Math.round(item.precioClp * 0.28);
+                      const ganancia = item.precioClp - costo;
+                      const margenPct = Math.round((ganancia / item.precioClp) * 100);
+
+                      return (
+                        <div className="mt-1 px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/25 dark:bg-amber-900/20">
+                          <div className="flex items-center justify-between text-[10px] font-bold">
+                            <span className="text-slate-500 dark:text-zinc-400">Costo Proveedor:</span>
+                            <span className="font-mono text-slate-700 dark:text-zinc-300">
+                              ${costo.toLocaleString('es-CL')} CLP
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between text-[10px] font-bold mt-0.5">
+                            <span className="text-slate-500 dark:text-zinc-400">Utilidad Neta:</span>
+                            <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                              +${ganancia.toLocaleString('es-CL')} CLP ({margenPct}% Margen)
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })()
+                  )}
                 </div>
 
                 {/* Ficha Técnica Rápida */}
@@ -431,6 +529,100 @@ export const InventarioView: React.FC = () => {
           <p className="text-xs text-slate-500 dark:text-zinc-400">
             Intenta con otro término de búsqueda o selecciona otra categoría.
           </p>
+        </div>
+      )}
+
+      {/* ── Tabla de Kardex: Bitácora de Movimientos (Solo ADMINISTRADOR) ── */}
+      {isAdmin && (
+        <div className="card-zenith rounded-2xl p-6 border border-amber-500/20 bg-gradient-to-br from-amber-500/[0.03] to-transparent animate-in fade-in duration-200">
+          <div className="flex items-center gap-2.5 pb-4 border-b border-slate-100 dark:border-white/5 mb-4">
+            <span className="p-2 rounded-xl bg-amber-500/10 text-amber-700 dark:text-amber-400">
+              <BookOpen size={18} />
+            </span>
+            <div>
+              <h3 className="text-base font-black tracking-tight text-slate-900 dark:text-white">
+                Registro de Entradas y Salidas de Lentes (Quién modificó el stock)
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
+                Control interno de quién actualizó el inventario, cuándo y en qué sucursal — exclusivo Gerencia General.
+              </p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto rounded-xl border border-slate-200/80 dark:border-zinc-800 shadow-2xs">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50/80 dark:bg-zinc-900/60 text-slate-500 dark:text-zinc-400 uppercase tracking-wider font-semibold border-b border-slate-200/80 dark:border-zinc-800 text-[11px]">
+                <tr>
+                  <th className="px-4 py-3">Fecha y Hora Exacta</th>
+                  <th className="px-4 py-3">Responsable (Quién lo hizo)</th>
+                  <th className="px-4 py-3">Tipo & N° Documento</th>
+                  <th className="px-4 py-3">Sucursal</th>
+                  <th className="px-4 py-3">Modelo & Cantidad</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-zinc-800/80 bg-white dark:bg-[#1C1A18]">
+                {(() => {
+                  const movimientosStorage: MovimientoKardex[] = (() => {
+                    try {
+                      return JSON.parse(localStorage.getItem('amaru_movimientos_stock') || '[]');
+                    } catch { return []; }
+                  })();
+
+                  const filas = movimientosStorage.length > 0
+                    ? movimientosStorage.slice(0, 8)
+                    : KARDEX_DEMO_INICIAL;
+
+                  return filas.map((mov, i) => {
+                    const eIngreso = (mov.tipo || 'Ingreso') === 'Ingreso' || (mov.cantidad ?? 0) >= 0;
+                    const fecha = mov.fechaHoraExacta || mov.fecha || '—';
+                    const responsable = mov.responsable || mov.operador || 'Administración';
+                    const guia = mov.guia || mov.numeroGuia || '—';
+                    const sucursal = mov.sucursal || 'Calama';
+                    const modelo = mov.modelo || mov.sku || '—';
+                    const cantidad = mov.cantidad ?? 0;
+
+                    return (
+                      <tr key={i} className="hover:bg-slate-50/70 dark:hover:bg-zinc-900/40 transition-colors">
+                        <td className="px-4 py-3 font-mono text-[11px] text-slate-700 dark:text-zinc-300 whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            <Clock size={12} className="text-slate-400 shrink-0" />
+                            {fecha}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="font-bold text-slate-900 dark:text-white">{responsable}</span>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                            eIngreso
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/40'
+                              : 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/40'
+                          }`}>
+                            <TrendingUp size={10} />
+                            {eIngreso ? 'Ingreso' : 'Descuento'}
+                          </span>
+                          <div className="text-[11px] font-mono text-slate-500 dark:text-zinc-400 mt-0.5">
+                            Guía / Doc: <span className="font-bold text-amaru-copper">{guia}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 dark:text-amber-300">
+                            📍 {sucursal}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-slate-900 dark:text-white text-[11px]">{modelo}</div>
+                          <div className={`font-mono font-black text-sm ${eIngreso ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                            {eIngreso ? '+' : ''}{cantidad} unid.
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  });
+                })()}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

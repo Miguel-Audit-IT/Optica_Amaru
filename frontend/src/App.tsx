@@ -3,7 +3,6 @@ import { Routes, Route, Navigate, NavLink, useNavigate } from 'react-router-dom'
 import {
   Sun,
   Moon,
-  ShieldAlert,
   Wrench,
   FileCheck,
   UserCheck,
@@ -18,6 +17,8 @@ import {
   RefreshCw,
   ShoppingBag,
   MapPin,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import { Login } from './components/Login';
 import TerminalView from './views/TerminalView';
@@ -100,7 +101,18 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
     return localStorage.getItem('amaru_nombre_paciente') || 'MIGUEL JORGE';
   });
   const [sucursalActiva, setSucursalActivaState] = useState<'Calama' | 'Antofagasta'>(() => getSucursalActiva());
+  const [sidebarColapsado, setSidebarColapsado] = useState<boolean>(() => {
+    return localStorage.getItem('amaru_sidebar_colapsado') === 'true';
+  });
   const { toggleTheme, isDark } = useTheme();
+
+  const toggleSidebar = () => {
+    setSidebarColapsado((prev) => {
+      const next = !prev;
+      localStorage.setItem('amaru_sidebar_colapsado', String(next));
+      return next;
+    });
+  };
 
   const isAdmin = isUserAdmin();
   const isPatient = isUserPatient();
@@ -181,7 +193,7 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
   };
 
   const sidebarNavLinkClass = ({ isActive }: { isActive: boolean }) =>
-    `w-full px-4 py-3.5 rounded-xl font-bold text-sm flex items-center gap-3 transition-all duration-150 cursor-pointer ${
+    `w-full ${sidebarColapsado ? 'px-2 py-3 justify-center' : 'px-4 py-3'} rounded-xl font-bold text-sm flex items-center ${sidebarColapsado ? 'justify-center' : 'gap-3'} transition-all duration-150 cursor-pointer ${
       isActive
         ? 'bg-amaru-copper text-white shadow-md shadow-orange-500/20 border-l-4 border-white'
         : 'text-slate-600 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.04]'
@@ -197,77 +209,145 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
 
   return (
     <div className="min-h-screen text-[#1F1D1A] dark:text-[#F7F6F3] flex flex-col md:flex-row w-full transition-colors duration-200 bg-[#FBFBFA] dark:bg-[#121110]">
-      {/* ── SIDEBAR IZQUIERDO FIJO ── */}
-      <aside className="w-full md:w-64 lg:w-72 shrink-0 border-b md:border-b-0 md:border-r border-slate-200/90 dark:border-white/10 bg-white dark:bg-[#181614] p-4 sm:p-5 flex flex-col justify-between md:min-h-screen md:sticky md:top-0 z-30 shadow-xs">
-        {/* Cabecera del Sidebar (Logo Grande) */}
+      {/* ── SIDEBAR IZQUIERDO FIJO Y COLAPSABLE ── */}
+      <aside className={`w-full ${sidebarColapsado ? 'md:w-20' : 'md:w-64 lg:w-72'} shrink-0 border-b md:border-b-0 md:border-r border-slate-200/90 dark:border-white/10 bg-white dark:bg-[#181614] ${sidebarColapsado ? 'p-3' : 'p-4 sm:p-5'} flex flex-col justify-between md:min-h-screen md:sticky md:top-0 z-30 shadow-xs transition-all duration-200`}>
+        {/* Cabecera del Sidebar (Logo y Botón Colapsar) */}
         <div>
-          <div className="flex items-center gap-3.5 pb-5 border-b border-slate-200/70 dark:border-white/10">
-            <div className="h-16 w-auto flex items-center justify-center p-2 rounded-2xl bg-white dark:bg-black/40 border border-slate-200/90 dark:border-white/10 shadow-sm shrink-0">
-              <img src={logoImg} alt="Óptica Amaru" className="h-full w-auto object-contain rounded-xl" />
+          <div className={`flex items-center ${sidebarColapsado ? 'flex-col gap-2 pb-4 justify-center' : 'justify-between gap-2 pb-5'} border-b border-slate-200/70 dark:border-white/10`}>
+            <div className={`flex items-center ${sidebarColapsado ? 'justify-center' : 'gap-3'} min-w-0`}>
+              <div className={`${sidebarColapsado ? 'h-11 w-11 p-1.5' : 'h-14 w-auto p-2'} flex items-center justify-center rounded-2xl bg-white dark:bg-black/40 border border-slate-200/90 dark:border-white/10 shadow-sm shrink-0 transition-all`}>
+                <img src={logoImg} alt="Óptica Amaru" className="h-full w-auto object-contain rounded-xl" />
+              </div>
+              {!sidebarColapsado && (
+                <div className="min-w-0">
+                  <h1 className="text-base sm:text-lg font-black tracking-tight text-slate-900 dark:text-white truncate">
+                    Óptica Amaru
+                  </h1>
+                  <p className="text-xs font-semibold text-amaru-copper dark:text-orange-400 truncate">
+                    Salud Visual
+                  </p>
+                </div>
+              )}
             </div>
-            <div className="min-w-0">
-              <h1 className="text-base sm:text-lg font-black tracking-tight text-slate-900 dark:text-white truncate">
-                Óptica Amaru
-              </h1>
-              <p className="text-xs font-semibold text-amaru-copper dark:text-orange-400 truncate">
-                Salud Visual
-              </p>
-            </div>
+
+            {/* Botón discreto para contraer / expandir en Desktop */}
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              title={sidebarColapsado ? 'Expandir barra lateral' : 'Contraer barra lateral'}
+              className="hidden md:flex p-1.5 rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 transition-colors cursor-pointer"
+            >
+              {sidebarColapsado ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+            </button>
           </div>
 
-          {/* Menú Vertical de Navegación (Orden Estrictamente Cronológico) */}
-          <nav className="mt-5 space-y-1.5">
-            {!isPatient ? (
-              <>
-                <NavLink to="/terminal" className={sidebarNavLinkClass}>
-                  <UserPlus size={18} className="shrink-0" />
-                  <span>Nueva Atención</span>
-                </NavLink>
-                <NavLink to="/inventario" className={sidebarNavLinkClass}>
-                  <ShoppingBag size={18} className="shrink-0" />
-                  <span>Inventario & Stock</span>
-                </NavLink>
-                <NavLink to="/seguimiento" className={sidebarNavLinkClass}>
-                  <Compass size={18} className="shrink-0" />
-                  <span>Seguimiento de Pedidos</span>
-                </NavLink>
-                <NavLink to="/despacho" className={sidebarNavLinkClass}>
-                  <Truck size={18} className="shrink-0" />
-                  <span>Entregas</span>
-                </NavLink>
-              </>
-            ) : (
-              <NavLink to="/seguimiento" className={sidebarNavLinkClass}>
+          {/* Menú Vertical de Navegación */}
+          <nav className="mt-4 space-y-1.5">
+            {isPatient ? (
+              <NavLink to="/seguimiento" className={sidebarNavLinkClass} title="Mis Pedidos">
                 <Compass size={18} className="shrink-0" />
-                <span>Mis Pedidos</span>
+                {!sidebarColapsado && <span>Mis Pedidos</span>}
               </NavLink>
-            )}
-            {isAdmin && (
-              <NavLink to="/dashboard" className={sidebarNavLinkClass}>
-                <BarChart3 size={18} className="shrink-0" />
-                <span>Dashboard</span>
-              </NavLink>
+            ) : isAdmin ? (
+              /* ── Sidebar Administradora: Lenguaje Directo de Dueña de Negocio ── */
+              <div className="space-y-4">
+                {/* 1. GESTIÓN DEL NEGOCIO */}
+                <div>
+                  {!sidebarColapsado ? (
+                    <div className="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
+                      Gestión del Negocio
+                    </div>
+                  ) : (
+                    <div className="h-px bg-slate-200/70 dark:bg-white/10 my-2 mx-1" />
+                  )}
+                  <div className="space-y-1">
+                    <NavLink to="/dashboard" className={sidebarNavLinkClass} title="Resumen del Negocio">
+                      <BarChart3 size={18} className="shrink-0" />
+                      {!sidebarColapsado && (
+                        <>
+                          <span className="flex-1">Resumen del Negocio</span>
+                          <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1 shrink-0">
+                            <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
+                            EN VIVO
+                          </span>
+                        </>
+                      )}
+                    </NavLink>
+                    <NavLink to="/inventario" className={sidebarNavLinkClass} title="Inventario y Ganancias">
+                      <ShoppingBag size={18} className="shrink-0" />
+                      {!sidebarColapsado && <span>Inventario y Ganancias</span>}
+                    </NavLink>
+                    <NavLink to="/seguimiento" className={sidebarNavLinkClass} title="Estado de Pedidos y Cobros">
+                      <Compass size={18} className="shrink-0" />
+                      {!sidebarColapsado && <span>Estado de Pedidos y Cobros</span>}
+                    </NavLink>
+                  </div>
+                </div>
+
+                {/* 2. OPERACIÓN EN TIENDA */}
+                <div>
+                  {!sidebarColapsado ? (
+                    <div className="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
+                      Operación en Tienda
+                    </div>
+                  ) : (
+                    <div className="h-px bg-slate-200/70 dark:bg-white/10 my-2 mx-1" />
+                  )}
+                  <div className="space-y-1">
+                    <NavLink to="/terminal" className={sidebarNavLinkClass} title="Vender en Tienda">
+                      <UserPlus size={18} className="shrink-0" />
+                      {!sidebarColapsado && <span>Vender en Tienda</span>}
+                    </NavLink>
+                    <NavLink to="/despacho" className={sidebarNavLinkClass} title="Entregar Lentes">
+                      <Truck size={18} className="shrink-0" />
+                      {!sidebarColapsado && <span>Entregar Lentes</span>}
+                    </NavLink>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* ── Sidebar Operador/Vendedor: Orden Cronológico POS ── */
+              <div className="space-y-1">
+                <NavLink to="/terminal" className={sidebarNavLinkClass} title="Nueva Atención">
+                  <UserPlus size={18} className="shrink-0" />
+                  {!sidebarColapsado && <span>Nueva Atención</span>}
+                </NavLink>
+                <NavLink to="/inventario" className={sidebarNavLinkClass} title="Inventario & Stock">
+                  <ShoppingBag size={18} className="shrink-0" />
+                  {!sidebarColapsado && <span>Inventario & Stock</span>}
+                </NavLink>
+                <NavLink to="/seguimiento" className={sidebarNavLinkClass} title="Seguimiento de Pedidos">
+                  <Compass size={18} className="shrink-0" />
+                  {!sidebarColapsado && <span>Seguimiento de Pedidos</span>}
+                </NavLink>
+                <NavLink to="/despacho" className={sidebarNavLinkClass} title="Entregas">
+                  <Truck size={18} className="shrink-0" />
+                  {!sidebarColapsado && <span>Entregas</span>}
+                </NavLink>
+              </div>
             )}
           </nav>
         </div>
 
         {/* Pie del Sidebar */}
-        <div className="pt-5 mt-5 border-t border-slate-200/70 dark:border-white/10 space-y-3">
+        <div className="pt-4 mt-4 border-t border-slate-200/70 dark:border-white/10 space-y-2.5">
           {/* Selector de Sucursal Activa */}
           {!isPatient && (
             <button
               type="button"
               onClick={handleToggleSucursal}
-              className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/30 transition-all cursor-pointer shadow-2xs hover:scale-[1.02] active:scale-[0.98]"
-              title="Click para alternar entre Sucursal Calama y Antofagasta"
+              className={`w-full flex items-center ${sidebarColapsado ? 'justify-center p-2.5' : 'justify-between px-3.5 py-2.5'} rounded-xl text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/30 transition-all cursor-pointer shadow-2xs hover:scale-[1.02] active:scale-[0.98]`}
+              title={`Sucursal Activa: ${sucursalActiva} (Click para alternar)`}
             >
               <div className="flex items-center gap-2">
                 <MapPin size={14} className="text-amaru-copper shrink-0" />
-                <span>Sucursal Activa</span>
+                {!sidebarColapsado && <span>Sucursal Activa</span>}
               </div>
-              <span className="bg-amber-500/20 dark:bg-amber-500/30 px-2 py-0.5 rounded-md font-mono">
-                {sucursalActiva}
-              </span>
+              {!sidebarColapsado && (
+                <span className="bg-amber-500/20 dark:bg-amber-500/30 px-2 py-0.5 rounded-md font-mono">
+                  {sucursalActiva}
+                </span>
+              )}
             </button>
           )}
 
@@ -276,14 +356,14 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
             <button
               type="button"
               onClick={() => setPopoverSincronizacionOpen(!popoverSincronizacionOpen)}
-              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer shadow-2xs ${
+              className={`w-full flex items-center ${sidebarColapsado ? 'justify-center p-2.5' : 'justify-between px-3.5 py-2.5'} rounded-xl text-xs font-semibold border transition-all cursor-pointer shadow-2xs ${
                 !isOnline
                   ? 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-400 hover:bg-rose-500/20'
                   : pendientesOffline > 0
                   ? 'bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-300 hover:bg-amber-500/20'
                   : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/20'
               }`}
-              title="Ver estado de conexión y sincronización local"
+              title={!isOnline ? 'Sin Conexión' : pendientesOffline > 0 ? `${pendientesOffline} en cola offline` : 'En Línea'}
             >
               {!isOnline ? (
                 <>
@@ -291,9 +371,9 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
                     <span className="relative flex h-2 w-2">
                       <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500" />
                     </span>
-                    <span className="font-mono text-[11px] font-bold">Sin Conexión</span>
+                    {!sidebarColapsado && <span className="font-mono text-[11px] font-bold">Sin Conexión</span>}
                   </div>
-                  {pendientesOffline > 0 && (
+                  {pendientesOffline > 0 && !sidebarColapsado && (
                     <span className="font-mono text-[10px] bg-rose-500/20 px-1.5 py-0.5 rounded">
                       {pendientesOffline}
                     </span>
@@ -306,21 +386,25 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
                       size={15}
                       className={sincronizandoOffline ? 'animate-spin text-amber-500' : 'text-amber-500 animate-pulse'}
                     />
-                    <span className="font-mono text-[11px] font-bold">En Línea</span>
+                    {!sidebarColapsado && <span className="font-mono text-[11px] font-bold">En Línea</span>}
                   </div>
-                  <span className="font-mono text-[10px] bg-amber-500/20 px-1.5 py-0.5 rounded">
-                    {pendientesOffline} cola
-                  </span>
+                  {!sidebarColapsado && (
+                    <span className="font-mono text-[10px] bg-amber-500/20 px-1.5 py-0.5 rounded">
+                      {pendientesOffline} cola
+                    </span>
+                  )}
                 </>
               ) : (
                 <>
                   <div className="flex items-center gap-2">
                     <CloudCheck size={15} className="text-emerald-600 dark:text-emerald-400" />
-                    <span className="font-medium text-[11px]">En Línea</span>
+                    {!sidebarColapsado && <span className="font-medium text-[11px]">En Línea</span>}
                   </div>
-                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
-                    Al día
-                  </span>
+                  {!sidebarColapsado && (
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
+                      Al día
+                    </span>
+                  )}
                 </>
               )}
             </button>
@@ -391,10 +475,10 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
           <button
             onClick={handleLogout}
             title="Cerrar Sesión Segura"
-            className="w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:text-white dark:text-zinc-300 dark:hover:text-white border border-slate-200 dark:border-white/10 hover:bg-rose-600 hover:border-rose-600 dark:hover:bg-rose-600 dark:hover:border-rose-600 transition-all cursor-pointer shadow-2xs"
+            className={`w-full flex items-center ${sidebarColapsado ? 'justify-center p-2.5' : 'justify-center gap-2 px-3.5 py-2.5'} rounded-xl text-xs font-bold text-slate-600 hover:text-white dark:text-zinc-300 dark:hover:text-white border border-slate-200 dark:border-white/10 hover:bg-rose-600 hover:border-rose-600 dark:hover:bg-rose-600 dark:hover:border-rose-600 transition-all cursor-pointer shadow-2xs`}
           >
-            <LogOut size={14} />
-            <span>Cerrar Sesión</span>
+            <LogOut size={14} className="shrink-0" />
+            {!sidebarColapsado && <span>Cerrar Sesión</span>}
           </button>
         </div>
       </aside>
@@ -413,10 +497,10 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
                 </span>
               </div>
             ) : isAdmin ? (
-              <div className="px-4 sm:px-5 py-2 rounded-2xl bg-amber-600 text-white border border-amber-500 shadow-md shadow-amber-600/30 flex items-center gap-2.5">
-                <ShieldAlert size={18} className="text-white shrink-0" />
+              <div className="px-4 sm:px-5 py-2 rounded-2xl bg-gradient-to-r from-amber-800 to-[#B85D19] text-white border border-amber-600/60 shadow-md shadow-amber-800/30 flex items-center gap-2.5">
+                <ShieldCheck size={18} className="text-white shrink-0" />
                 <span className="text-base sm:text-lg font-black tracking-tight uppercase">
-                  CARLOS MENDOZA (ADMINISTRADOR)
+                  {(localStorage.getItem('amaru_nombre_admin') || 'MARÍA GONZÁLEZ').toUpperCase()} (ADMINISTRADORA)
                 </span>
               </div>
             ) : isPatient ? (
@@ -484,9 +568,9 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
         )}
 
         {/* ── Contenido de Vistas ── */}
-        <main className="w-full max-w-7xl px-4 sm:px-8 py-6 mx-auto flex-1">
+        <main className="w-full max-w-full px-4 sm:px-6 lg:px-8 py-6 flex-1">
         <Routes>
-          <Route path="/" element={<Navigate to={isPatient ? "/seguimiento" : "/terminal"} replace />} />
+          <Route path="/" element={<Navigate to={isPatient ? "/seguimiento" : isAdmin ? "/dashboard" : "/terminal"} replace />} />
           <Route
             path="/terminal"
             element={
@@ -539,7 +623,7 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
           />
           <Route path="/qr" element={<PublicQRView />} />
           {/* Catch-all → seguimiento si es paciente, sino terminal */}
-          <Route path="*" element={<Navigate to={isPatient ? "/seguimiento" : "/terminal"} replace />} />
+          <Route path="*" element={<Navigate to={isPatient ? "/seguimiento" : isAdmin ? "/dashboard" : "/terminal"} replace />} />
         </Routes>
       </main>
       </div>

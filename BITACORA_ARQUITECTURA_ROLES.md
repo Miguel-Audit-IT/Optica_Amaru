@@ -140,17 +140,56 @@ Diseñado como un punto de venta (POS) ágil, moderno (estilo Shopify POS / Line
 
 ---
 
-## 4. Mapa de Sincronización hacia Backend Django (`models.py` / PostgreSQL)
+## 4. Rol 3: Centro de Mando de la Administradora (`ADMINISTRADOR`)
+
+Orientado a la dueña y gerencia general (**María González**) para supervisar la rentabilidad consolidada de **Calama** y **Antofagasta**, controlar el flujo de caja, y ejercer control interno con poder exclusivo de rectificación clínica y reversa de compras.
+
+### 4.1. Identidad Sobria y Navegación Ejecutiva
+- **Badge de Identidad Ejecutiva:** Eliminación de coronas informales o etiquetas "DUEÑA". Se implementó una insignia sobria con ícono `ShieldCheck`: `MARÍA GONZÁLEZ (ADMINISTRADORA)`.
+- **Sidebar Inteligente y Colapsable:**
+  - Control de expansión y contracción para optimizar el área de trabajo en pantallas de escritorio.
+  - Lenguaje directo y no técnico:
+    - **GESTIÓN DEL NEGOCIO:** *Resumen del Negocio* (`DashboardView`), *Inventario y Ganancias* (`InventarioView`), *Estado de Pedidos y Cobros* (`SeguimientoCompraView`).
+    - **OPERACIÓN EN TIENDA:** *Atención en Mesón*, *Entregas en Sucursal*.
+
+### 4.2. Arqueo Rápido de Medios de Pago y Control de Calidad
+Fila ejecutiva de 4 indicadores compactos ubicada bajo los KPIs principales:
+- `💳 Tarjetas / Webpay`: **$9.450.000**
+- `🏦 Transferencias / Efectivo`: **$5.120.000**
+- `🏢 Convenios Planilla`: **$10.110.000**
+- `🛠️ Rectificaciones / Anulaciones`: **X casos** (conteo reactivo conectado a `amaru_anulaciones_rectificaciones`).
+
+### 4.3. Acciones de Control Administrativo Exclusivas
+Barra de control ejecutiva en `Seguimiento de Pedidos` y botones de acción directa en la tabla de `Historial de Ventas`:
+1. **✏️ Corregir Mediciones / Pedido (Garantía Clínica y Errores):**
+   - Modal administrativo para rectificar esfera, cilindro, eje (OD/OI), distancia pupilar (DP), modelo de montura y sucursal.
+   - Motivos obligatorios estandarizados: *Ajuste de mediciones por optómetra (Garantía clínica)*, *Error de digitación en tienda*, *Cambio de armazón solicitado por cliente*.
+   - Sello visible e inmutable en la tarjeta: `✏️ Rectificado por María González (Administradora) · [Fecha y Hora] — Motivo: [Motivo]`.
+   - Evento auditado en `amaru_anulaciones_rectificaciones`.
+2. **🚫 Anular Compra / Devolver Stock:**
+   - Modal de confirmación crítica con motivo obligatorio: *Desistimiento del cliente*, *Error de cobro/duplicidad*, *Rechazo de cobertura convenio*.
+   - Estado del pedido actualizado a `ANULADO / REVERSADO`.
+   - Reintegración automática de `+1 unidad` al inventario físico de la sucursal (`Calama` o `Antofagasta`) mediante `registrarIngresoStock` de `inventarioService.ts` (`amaru_inventario_stock` y `amaru_movimientos_stock`).
+
+### 4.4. Visibilidad Financiera y Control de Márgenes
+- **Costo y Margen Comercial:** Despliegue confidencial exclusivo para gerencia del Costo de Proveedor y Margen Neto (%) en todo el catálogo de armazones e insumos ópticos.
+- **KPIs Consolidados en Tiempo Real:** Totalización automática de ventas, márgenes brutos, cuentas por cobrar (CxC convenios) y rotación de stock entre Calama y Antofagasta.
+
+---
+
+## 5. Mapa de Sincronización hacia Backend Django (`models.py` / PostgreSQL)
 
 Para la fase de consolidación y sustitución de estados en memoria/localStorage por persistencia transaccional definitiva en PostgreSQL, se define la siguiente matriz de integración:
 
 | Clave `localStorage` (Frontend) | Rol Emisor | Modelo Django Destino | Tabla PostgreSQL | Campos Mapeados / Lógica de Consolidación |
 | :--- | :--- | :--- | :--- | :--- |
 | `amaru_access_token` | Todos | N/A (SimpleJWT) | N/A | Token Bearer en cabecera `Authorization: Bearer <token>`. |
-| `amaru_sucursal_activa` | Operador | `StockSucursal` (`apps.transacciones`) | `stock_sucursal` | Filtra existencias por `sucursal` (`'CALAMA'` o `'ANTOFAGASTA'`). |
+| `amaru_sucursal_activa` | Operador / Admin | `StockSucursal` (`apps.transacciones`) | `stock_sucursal` | Filtra existencias por `sucursal` (`'CALAMA'` o `'ANTOFAGASTA'`). |
 | `amaru_solicitudes_recetas` | Paciente / QR | `RecetaOptica` + `SolicitudEntrega` | `receta_optica`, `solicitud_entrega` | `origen = 'QR_PUBLICO'` o `'WEB_PACIENTE'`, `estado = 'EN_REVISION'`. Parámetros clínicos en `JSONField`. |
 | `amaru_inventario_stock` | Operador / Admin | `ArmazonInventario` + `StockSucursal` | `armazon_inventario`, `stock_sucursal` | Desglose relacional `(sku_armazon, sucursal) -> stock_disponible`. |
-| `amaru_movimientos_stock` | Operador | `MovimientoStock` (`apps.transacciones`) | `movimiento_stock` | `tipo_movimiento = 'AJUSTE_ENTRADA'`, `numero_guia_factura`, `rut_operador_id`, `cantidad`. |
+| `amaru_movimientos_stock` | Operador / Admin | `MovimientoStock` (`apps.transacciones`) | `movimiento_stock` | `tipo_movimiento = 'AJUSTE_ENTRADA'`, `numero_guia_factura`, `rut_operador_id`, `cantidad`. |
+| `amaru_anulaciones_rectificaciones`| Admin | `AuditoriaTransaccion` + `MovimientoStock` | `auditoria_transaccion`, `movimiento_stock` | `tipo = 'RECTIFICACION'/'ANULACION'`, `folio`, `motivo`, `responsable`, reversa de stock. |
+| `amaru_transacciones_dashboard` | Admin | `VentaTransaccion` (`apps.transacciones`) | `venta_transaccion` | Historial consolidado, estados `Rectificado`, `Anulado`, `Entregado`. |
 | `amaru_llegadas_acreditadas` | Operador | `SolicitudEntrega` (`apps.transacciones`) | `solicitud_entrega` | Actualiza `estado_pedido = EstadoPedido.LISTA` (`'Lista'`). |
 | `amaru_folio_entrega_precargado`| Operador | `RecepcionDespacho` (`apps.transacciones`)| `recepcion_despacho` | Transfiere `folio_unico_qr` para liquidar el despacho. |
 | `amaru_qr_last_submission` | Anónimo | N/A (Throttling Redis) | Cache Layer | Clave de rate-limit IP/Fingerprint (60s) en servidor web. |
@@ -158,14 +197,18 @@ Para la fase de consolidación y sustitución de estados en memoria/localStorage
 
 ---
 
-## 5. Próximos Hitos Pendientes (Roadmap Estratégico)
+## 6. Próximos Hitos Pendientes (Roadmap Estratégico)
 
-1. **Rol 3: Perfil del ADMINISTRADOR (`ADMINISTRADOR`):**
-   - **Dashboard Gerencial:** Métricas en tiempo real de facturación, volumen de pedidos por sucursal (**Calama** vs **Antofagasta**) y tiempos promedio de laboratorio.
-   - **Aprobación Clínica y Cuarentena:** Mesa de trabajo médica para validar recetas subidas por pacientes y vía QR público antes de derivación a taller.
-   - **Gestión Maestra de Stock & Kardex:** Control de costos de adquisición, márgenes brutos, liquidación de convenios por nómina y balance de inventario central.
-
-2. **Rol 4: Perfil del AUDITOR (`AUDITOR`):**
+1. **Rol 4: Perfil del AUDITOR (`AUDITOR`):**
    - **Trazabilidad Criptográfica SHA-256:** Verificación y validación de sellos de integridad documental en los comprobantes PDF de entrega conforme.
    - **Logs de Acceso y Cumplimiento Normativo:** Registro inmutable de consultas a recetas oftalmológicas (Ley N° 21.719) y accesos al sistema (Ley N° 21.663).
    - **Auditoría Forense de Inventario:** Conciliación entre guías de despacho ingresadas en mesón y mermas físicas registradas en sucursales.
+
+---
+
+## 7. Resumen de Consolidación · Rol 3: Administradora (Gerencia y Control Interno)
+
+- **Identidad Sobria:** Etiqueta ejecutiva `(ADMINISTRADORA)` con menú lateral colapsable y aterrizaje forzado en Dashboard.
+- **Lenguaje de Negocio:** Cambio de terminología técnica a lenguaje claro (*"Resumen del Negocio"*, *"Inventario y Ganancias"*, *"Registro de Entradas y Salidas"*).
+- **Módulo de Excepciones (Exclusivo):** Implementación de botones `"✏️ Corregir"` y `"🚫 Anular"` en Seguimiento y Dashboard, permitiendo rectificar dioptrías (OD/OI/DP) o reversar ventas con devolución automática de stock a la sucursal de origen (`Calama`/`Antofagasta`) y registro de auditoría del responsable.
+- **Visibilidad Financiera:** Despliegue de Costo de Proveedor y Margen Neto (%) en todo el catálogo de armazones. KPIs de ventas sumados en tiempo real.

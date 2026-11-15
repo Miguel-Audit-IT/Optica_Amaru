@@ -33,10 +33,10 @@ import {
   PackageCheck,
 } from 'lucide-react';
 import { formatearRUT } from '../utils/rut';
-import { getUserInfo, isUserPatient, isUserOperator } from '../utils/auth';
+import { getUserInfo, isUserPatient, isUserOperator, isUserAdmin } from '../utils/auth';
 import { AutoRecetaModal } from '../components/AutoRecetaModal';
 import { WhatsAppIcon } from '../components/icons/WhatsAppIcon';
-import { getSucursalActiva } from '../services/inventarioService';
+import { getSucursalActiva, registrarIngresoStock } from '../services/inventarioService';
 import {
   TitanioProIcon,
   AcetatoLumiereIcon,
@@ -51,6 +51,63 @@ import {
   type SolicitudReceta,
   type CiudadAtencion,
 } from '../services/recetasService';
+
+// ── Control Administrativo & Auditoría de Rectificaciones / Anulaciones ───────
+
+export interface RegistroControlAdmin {
+  id: string;
+  tipo: 'RECTIFICACION' | 'ANULACION';
+  folio: string;
+  paciente: string;
+  rut: string;
+  fechaHoraExacta: string;
+  responsable: string;
+  motivo: string;
+  detalles?: string;
+  sucursal?: string;
+}
+
+export function getRegistrosControlAdmin(): RegistroControlAdmin[] {
+  try {
+    const raw = localStorage.getItem('amaru_anulaciones_rectificaciones');
+    if (raw) return JSON.parse(raw);
+  } catch {
+    // fallback
+  }
+  return [
+    {
+      id: 'REG-001',
+      tipo: 'RECTIFICACION',
+      folio: 'FOLIO-8F1085AD',
+      paciente: 'Mario Cárdenas González',
+      rut: '24.533.343-9',
+      fechaHoraExacta: '14/11/2026 · 11:20:15 hrs',
+      responsable: 'María González (Administradora)',
+      motivo: 'Ajuste de mediciones por optómetra (Garantía clínica)',
+      detalles: 'Ajuste cil: -0.50 a -0.75 en OD',
+      sucursal: 'Calama',
+    },
+    {
+      id: 'REG-002',
+      tipo: 'ANULACION',
+      folio: 'FOLIO-9E8821F0',
+      paciente: 'Esteban Valenzuela Jara',
+      rut: '19.482.110-2',
+      fechaHoraExacta: '12/11/2026 · 18:05:30 hrs',
+      responsable: 'María González (Administradora)',
+      motivo: 'Desistimiento del cliente',
+      detalles: '+1 unidad devuelta al stock de Calama',
+      sucursal: 'Calama',
+    },
+  ];
+}
+
+export function guardarRegistroControlAdmin(reg: RegistroControlAdmin) {
+  const current = getRegistrosControlAdmin();
+  const updated = [reg, ...current];
+  localStorage.setItem('amaru_anulaciones_rectificaciones', JSON.stringify(updated));
+  window.dispatchEvent(new Event('amaru_anulaciones_updated'));
+}
 
 // ── Types & Interfaces ────────────────────────────────────────────────────────
 
@@ -90,11 +147,25 @@ export interface PedidoTrazabilidad {
   estadoBadge: string;
   tieneAceleracionFiniquito: boolean;
   hitos: HitoTrazabilidad[];
+  sucursalRetiro?: string;
+  odEsfera?: string;
+  odCilindro?: string;
+  odEje?: string;
+  oiEsfera?: string;
+  oiCilindro?: string;
+  oiEje?: string;
+  dpMm?: string;
+  selloRectificacion?: string;
+  esAnulado?: boolean;
+  motivoAnulacion?: string;
 }
 
 export const limpiarEstadoHumano = (estado?: string): string => {
   if (!estado) return 'EN PROCESAMIENTO';
   const e = estado.toUpperCase();
+  if (e.includes('ANULADO') || e.includes('REVERSADO')) {
+    return 'ANULADO / REVERSADO';
+  }
   if (e.includes('RETENCION_LABORAL') || e.includes('FINIQUITO')) {
     return 'CONVENIO ACTIVO · LISTO EN SUCURSAL';
   }
@@ -353,6 +424,7 @@ export const SeguimientoCompraView: React.FC = () => {
   const userInfo = getUserInfo();
   const esPaciente = isUserPatient();
   const esOperador = isUserOperator();
+  const esAdmin = isUserAdmin();
   const [sucursalActiva, setSucursalActivaState] = useState<'Calama' | 'Antofagasta'>(() => getSucursalActiva());
 
   const [llegadasAcreditadas, setLlegadasAcreditadas] = useState<Record<string, boolean>>(() => {
@@ -541,6 +613,127 @@ export const SeguimientoCompraView: React.FC = () => {
     }
     setToastMensaje(`¡Solicitud ${datos.folio} enviada con éxito! Tu receta y armazón ${datos.armazon} están en validación.`);
     setTimeout(() => setToastMensaje(null), 6000);
+  };
+
+  // ── Estados y Handlers para Acciones de Control Administrativo (Exclusivo Administradora) ──
+  const [modalCorregirOpen, setModalCorregirOpen] = useState<boolean>(false);
+  const [modalAnularOpen, setModalAnularOpen] = useState<boolean>(false);
+
+  // Campos para Modal de Corrección
+  const [formOdEsfera, setFormOdEsfera] = useState<string>('-1.50');
+  const [formOdCilindro, setFormOdCilindro] = useState<string>('-0.50');
+  const [formOdEje, setFormOdEje] = useState<string>('90°');
+  const [formOiEsfera, setFormOiEsfera] = useState<string>('-1.25');
+  const [formOiCilindro, setFormOiCilindro] = useState<string>('-0.25');
+  const [formOiEje, setFormOiEje] = useState<string>('85°');
+  const [formDpMm, setFormDpMm] = useState<string>('63 mm');
+  const [formArmazon, setFormArmazon] = useState<string>('EPP-TITAN-001 - Titanium Shield Pro (ANSI Z87.1 / DS 594)');
+  const [formSucursal, setFormSucursal] = useState<'Calama' | 'Antofagasta'>('Calama');
+  const [formMotivoCorreccion, setFormMotivoCorreccion] = useState<string>('Ajuste de mediciones por optómetra (Garantía clínica)');
+
+  // Campos para Modal de Anulación
+  const [formMotivoAnulacion, setFormMotivoAnulacion] = useState<string>('Desistimiento del cliente');
+  const [anulandoEnProceso, setAnulandoEnProceso] = useState<boolean>(false);
+
+  const abrirModalCorregir = () => {
+    if (!pedidoActual) return;
+    setFormOdEsfera(pedidoActual.odEsfera || '-1.50');
+    setFormOdCilindro(pedidoActual.odCilindro || '-0.50');
+    setFormOdEje(pedidoActual.odEje || '90°');
+    setFormOiEsfera(pedidoActual.oiEsfera || '-1.25');
+    setFormOiCilindro(pedidoActual.oiCilindro || '-0.25');
+    setFormOiEje(pedidoActual.oiEje || '85°');
+    setFormDpMm(pedidoActual.dpMm || '63 mm');
+    setFormArmazon(pedidoActual.modeloArmazon || 'EPP-TITAN-001 - Titanium Shield Pro (ANSI Z87.1 / DS 594)');
+    setFormSucursal(
+      (pedidoActual.sucursalRetiro as 'Calama' | 'Antofagasta') ||
+      (sucursalActiva || 'Calama')
+    );
+    setFormMotivoCorreccion('Ajuste de mediciones por optómetra (Garantía clínica)');
+    setModalCorregirOpen(true);
+  };
+
+  const handleGuardarCorreccion = () => {
+    if (!pedidoActual) return;
+    const ahora = new Date().toLocaleString('es-CL');
+    const sello = `✏️ Rectificado por María González (Administradora) · ${ahora} — Motivo: ${formMotivoCorreccion}`;
+
+    const pedidoActualizado: PedidoTrazabilidad = {
+      ...pedidoActual,
+      modeloArmazon: formArmazon,
+      sucursalRetiro: formSucursal,
+      odEsfera: formOdEsfera,
+      odCilindro: formOdCilindro,
+      odEje: formOdEje,
+      oiEsfera: formOiEsfera,
+      oiCilindro: formOiCilindro,
+      oiEje: formOiEje,
+      dpMm: formDpMm,
+      selloRectificacion: sello,
+    };
+
+    setPedidoActual(pedidoActualizado);
+    setModalCorregirOpen(false);
+
+    guardarRegistroControlAdmin({
+      id: `REG-${Date.now()}`,
+      tipo: 'RECTIFICACION',
+      folio: pedidoActual.folio,
+      paciente: pedidoActual.nombreTitular,
+      rut: pedidoActual.rutTitular,
+      fechaHoraExacta: ahora,
+      responsable: 'María González (Administradora)',
+      motivo: formMotivoCorreccion,
+      detalles: `OD: ${formOdEsfera}/${formOdCilindro}/${formOdEje} | OI: ${formOiEsfera}/${formOiCilindro}/${formOiEje} | DP: ${formDpMm} | Sucursal: ${formSucursal}`,
+      sucursal: formSucursal,
+    });
+
+    setToastMensaje(`✓ Mediciones y datos del pedido ${pedidoActual.folio} rectificados con éxito por Administradora.`);
+    setTimeout(() => setToastMensaje(null), 5000);
+  };
+
+  const handleConfirmarAnulacion = () => {
+    if (!pedidoActual) return;
+    setAnulandoEnProceso(true);
+    const ahora = new Date().toLocaleString('es-CL');
+    const sucursalTarget = (pedidoActual.sucursalRetiro as 'Calama' | 'Antofagasta') || sucursalActiva || 'Calama';
+    const sello = `🚫 Anulado por María González (Administradora) · ${ahora} — Motivo: ${formMotivoAnulacion} (+1 unidad devuelta al stock de ${sucursalTarget})`;
+
+    registrarIngresoStock(
+      'EPP-TITAN-001',
+      sucursalTarget,
+      1,
+      `REV-${pedidoActual.folio.replace('FOLIO-', '')}`,
+      'María González (Administradora)'
+    );
+
+    const pedidoAnulado: PedidoTrazabilidad = {
+      ...pedidoActual,
+      estadoBadge: 'ANULADO / REVERSADO',
+      esAnulado: true,
+      motivoAnulacion: formMotivoAnulacion,
+      selloRectificacion: sello,
+    };
+
+    setPedidoActual(pedidoAnulado);
+    setAnulandoEnProceso(false);
+    setModalAnularOpen(false);
+
+    guardarRegistroControlAdmin({
+      id: `REG-${Date.now()}`,
+      tipo: 'ANULACION',
+      folio: pedidoActual.folio,
+      paciente: pedidoActual.nombreTitular,
+      rut: pedidoActual.rutTitular,
+      fechaHoraExacta: ahora,
+      responsable: 'María González (Administradora)',
+      motivo: formMotivoAnulacion,
+      detalles: `+1 unidad reintegrada al inventario de ${sucursalTarget}`,
+      sucursal: sucursalTarget,
+    });
+
+    setToastMensaje(`✓ Compra anulada. Se reversó la venta y se devolvió +1 unidad al stock de Sucursal ${sucursalTarget}.`);
+    setTimeout(() => setToastMensaje(null), 5000);
   };
 
   // Consulta inicial de pedidos si el usuario es Paciente
@@ -943,8 +1136,8 @@ export const SeguimientoCompraView: React.FC = () => {
 
         {/* Acceso rápido a comprobantes PDF y Soporte WhatsApp */}
         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-          {/* Botón de Soporte por WhatsApp (Ocultar estrictamente para el Vendedor) */}
-          {!esOperador && (
+          {/* Botón de Soporte por WhatsApp (Ocultar para Vendedor y Administrador) */}
+          {!esOperador && !esAdmin && (
             <a
               href={`https://wa.me/56985860973?text=Hola,%20necesito%20asistencia%20en%20el%20Portal%20del%20Paciente%20(RUT:%20${encodeURIComponent(userInfo.rut || userInfo.username || '')})`}
               target="_blank"
@@ -1559,7 +1752,7 @@ export const SeguimientoCompraView: React.FC = () => {
               <span>{esOperador ? 'Buscar Pedido' : 'Buscar Folio'}</span>
             </button>
 
-            {!esOperador && (
+            {!esOperador && !esAdmin && (
               <a
                 href={`https://wa.me/56985860973?text=Hola,%20necesito%20ayuda%20con%20mi%20pedido%20folio:%20${encodeURIComponent(pedidoActual?.folio || inputFolio || '')}`}
                 target="_blank"
@@ -1662,8 +1855,8 @@ export const SeguimientoCompraView: React.FC = () => {
         )
       ) : (
         <>
-          {/* ── 2. Tarjeta de Resumen del Pedido (Vendedor Amigable vs Técnico Admin) ── */}
-          {esOperador ? (
+          {/* ── 2. Tarjeta de Resumen del Pedido (Vendedor/Admin Amigable vs Auditor) ── */}
+          {(esOperador || esAdmin) ? (
             <div
               key={`vendedor-card-${pedidoActual.folio}`}
               className="card-zenith optical-sheen animate-stagger-1 rounded-3xl p-6 sm:p-7 relative overflow-hidden transition-all duration-200 border border-slate-200/90 dark:border-white/10 shadow-sm"
@@ -1778,6 +1971,59 @@ export const SeguimientoCompraView: React.FC = () => {
                   </button>
                 </div>
               </div>
+
+              {/* Sello de Rectificación o Anulación si existe */}
+              {pedidoActual.selloRectificacion && (
+                <div
+                  className={`mt-4 p-3.5 rounded-2xl border text-xs flex items-center gap-2.5 animate-in fade-in duration-200 ${
+                    pedidoActual.esAnulado
+                      ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 font-semibold'
+                      : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 font-semibold'
+                  }`}
+                >
+                  <span className="text-base">{pedidoActual.esAnulado ? '🚫' : '✏️'}</span>
+                  <span>{pedidoActual.selloRectificacion}</span>
+                </div>
+              )}
+
+              {/* ── Barra Exclusiva de Control Administrativo (Solo ADMINISTRADOR) ── */}
+              {esAdmin && (
+                <div className="mt-5 pt-4 border-t border-amber-500/25 bg-amber-500/[0.04] dark:bg-amber-950/20 rounded-2xl p-4 border border-amber-500/30 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs">
+                  <div className="flex items-center gap-2.5">
+                    <span className="p-2 rounded-xl bg-amber-500/15 text-amber-700 dark:text-amber-300 font-bold text-xs">
+                      ⚙️
+                    </span>
+                    <div>
+                      <div className="text-xs font-black uppercase tracking-wider text-amber-950 dark:text-amber-200">
+                        Acciones de Control Administrativo (Exclusivo Administradora)
+                      </div>
+                      <div className="text-[11px] text-amber-800/80 dark:text-amber-400">
+                        Poder de rectificación de dioptrías por garantía y anulación con devolución automática a Kardex.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={abrirModalCorregir}
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 active:scale-95 text-white shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Edit3 size={13} />
+                      <span>✏️ Corregir Mediciones / Pedido</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setModalAnularOpen(true)}
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 active:scale-95 text-white shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <AlertTriangle size={13} />
+                      <span>🚫 Anular Compra / Devolver Stock</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div
@@ -1968,45 +2214,34 @@ export const SeguimientoCompraView: React.FC = () => {
                 <div className="p-2.5 bg-amber-500/15 text-amber-600 dark:text-amber-400 rounded-xl shrink-0">
                   <AlertTriangle size={24} className="animate-pulse" />
                 </div>
-                <div className="space-y-1.5 flex-1">
+                <div className="space-y-2 flex-1">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="text-sm font-bold text-amber-900 dark:text-amber-200 uppercase tracking-wide flex items-center gap-2">
-                      <span>Aceleración por Finiquito - Exigible Hoy</span>
-                      <span className="text-[10px] bg-amber-600 text-white px-2 py-0.5 rounded-full font-mono font-semibold">
-                        DS 594 & Art. 177 CdT
-                      </span>
+                    <h3 className="text-sm font-bold text-amber-900 dark:text-amber-200 flex items-center gap-2">
+                      <span>⚠️ Cobro Pendiente por Término de Contrato — Total a Cobrar: {formatCLP(pedidoActual.saldoTotal)}</span>
                     </h3>
-                    <span className="text-xs font-mono font-extrabold text-amber-800 dark:text-amber-300">
-                      Total Exigible: {formatCLP(pedidoActual.saldoTotal)}
-                    </span>
                   </div>
-                  <p className="text-xs text-amber-800/90 dark:text-amber-300/90 leading-relaxed">
-                    Este pedido ha sido retenido legalmente por término de contrato laboral con la empresa minera.
-                    Las 3 cuotas pendientes de descuento por planilla han sido consolidadas y quedan declaradas
-                    en cobro preferente de retención inmediata contra la liquidación final de sueldo e indemnizaciones.
+                  <p className="text-xs text-amber-800/90 dark:text-amber-300/90 leading-relaxed font-medium">
+                    El cliente finalizó su contrato en la empresa en convenio. Las 3 cuotas pendientes se agruparon para cobro directo en su liquidación final.
                   </p>
 
-                  <div className="pt-2 flex flex-wrap items-center gap-3">
+                  <div className="pt-1 flex flex-wrap items-center gap-3">
                     <button
                       type="button"
                       onClick={() => handleDescargarFiniquito(pedidoActual.folio)}
                       disabled={descargandoPDF !== null}
-                      className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold tracking-wide flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                      className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-semibold tracking-wide flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
                     >
                       <Download size={13} />
-                      <span>Descargar Copia Legal de Liquidación PDF</span>
+                      <span>Descargar Liquidación Finiquito PDF</span>
                     </button>
-                    <span className="text-[11px] text-amber-700/80 dark:text-amber-400/80 italic">
-                      * Hash forense registrado inmutablemente en el registro de auditoría de faena.
-                    </span>
                   </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* ── 4. Línea de Tiempo (Stepper): Vendedor Acreditado vs Técnico ── */}
-          {esOperador ? (
+          {/* ── 4. Línea de Tiempo (Stepper): Vendedor/Admin Acreditado vs Auditor Forense ── */}
+          {(esOperador || esAdmin) ? (
             (() => {
               const paso2Acreditado = !pedidoActual.estadoBadge.includes('LABORATORIO') && pedidoActual.folio !== 'FOLIO-2B4C8901';
               const paso3Acreditado = Boolean(llegadasAcreditadas[pedidoActual.folio]) || (pedidoActual.folio === 'FOLIO-8F1085AD') || (!pedidoActual.estadoBadge.includes('LABORATORIO') && !pedidoActual.estadoBadge.includes('DESPACHO') && pedidoActual.folio !== 'FOLIO-2B4C8901' && pedidoActual.folio !== 'FOLIO-4D7E1123');
@@ -2319,8 +2554,8 @@ export const SeguimientoCompraView: React.FC = () => {
 
                         {/* Detalles adicionales específicos por hito */}
 
-                        {/* Sello SHA-256 en Entrega DS 594: Terminal Forense Oscura */}
-                        {hito.selloSha256 && (
+                        {/* Sello SHA-256 en Entrega DS 594: Terminal Forense Oscura (Exclusivo AUDITOR) */}
+                        {hito.selloSha256 && userInfo.rol === 'AUDITOR' && (
                           <div className="mt-3 bg-zinc-950 border border-emerald-500/30 rounded-xl p-3.5 space-y-2.5 shadow-lg shadow-black/40">
                             {/* Terminal prompt header */}
                             <div className="flex items-center justify-between border-b border-emerald-500/20 pb-2">
@@ -2420,9 +2655,10 @@ export const SeguimientoCompraView: React.FC = () => {
         </>
       )}
 
-      {/* ── 5. Vitrina Ligera ("Oportunidades") ── */}
-      <div className="card-zenith animate-stagger-4 rounded-3xl p-6 sm:p-8 space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-100 dark:border-white/5 pb-4">
+      {/* ── 5. Vitrina Ligera ("Oportunidades") - Exclusivo PACIENTE ── */}
+      {esPaciente && (
+        <div className="card-zenith animate-stagger-4 rounded-3xl p-6 sm:p-8 space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-100 dark:border-white/5 pb-4">
           <div>
             <div className="flex items-center gap-2">
               <span className="p-1.5 rounded-lg bg-amaru-copper/10 text-amaru-copper">
@@ -2590,6 +2826,7 @@ export const SeguimientoCompraView: React.FC = () => {
           </div>
         </div>
       </div>
+      )}
 
       {/* ── 6. Marco Normativo y Legal Omnicanal ── */}
       <div className="card-zenith animate-stagger-3 rounded-2xl p-5 text-xs text-slate-500 dark:text-zinc-400 flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -2614,6 +2851,277 @@ export const SeguimientoCompraView: React.FC = () => {
         rutPaciente={formatearRUT(userInfo.rut || userInfo.username)}
         onRecetaEnviada={handleRecetaEnviada}
       />
+
+      {/* ── Modal de Rectificación de Mediciones / Pedido (Exclusivo Administradora) ── */}
+      {modalCorregirOpen && pedidoActual && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#1C1A18] border border-slate-200 dark:border-white/10 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-white/5">
+              <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                <Edit3 size={18} />
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                    Rectificar Mediciones y Pedido
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                    Folio: {pedidoActual.folio} · Paciente: {pedidoActual.nombreTitular}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalCorregirOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-1 rounded-lg cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              {/* Bloque: Mediciones Ópticas (OD y OI) */}
+              <div className="p-3.5 bg-slate-50 dark:bg-black/30 rounded-2xl border border-slate-200/70 dark:border-zinc-800 space-y-3">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                  1. Mediciones de Refracción Oftálmica
+                </span>
+                
+                {/* Ojo Derecho (OD) */}
+                <div>
+                  <span className="text-[11px] font-bold text-amaru-copper block mb-1">👁️ Ojo Derecho (OD)</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[10px] text-slate-400 block">Esfera (Esf)</label>
+                      <input
+                        type="text"
+                        value={formOdEsfera}
+                        onChange={(e) => setFormOdEsfera(e.target.value)}
+                        className="w-full p-2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-lg text-xs font-mono font-bold"
+                        placeholder="-1.50"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 block">Cilindro (Cil)</label>
+                      <input
+                        type="text"
+                        value={formOdCilindro}
+                        onChange={(e) => setFormOdCilindro(e.target.value)}
+                        className="w-full p-2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-lg text-xs font-mono font-bold"
+                        placeholder="-0.50"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 block">Eje (°)</label>
+                      <input
+                        type="text"
+                        value={formOdEje}
+                        onChange={(e) => setFormOdEje(e.target.value)}
+                        className="w-full p-2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-lg text-xs font-mono font-bold"
+                        placeholder="90°"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Ojo Izquierdo (OI) */}
+                <div>
+                  <span className="text-[11px] font-bold text-amaru-copper block mb-1">👁️ Ojo Izquierdo (OI)</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[10px] text-slate-400 block">Esfera (Esf)</label>
+                      <input
+                        type="text"
+                        value={formOiEsfera}
+                        onChange={(e) => setFormOiEsfera(e.target.value)}
+                        className="w-full p-2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-lg text-xs font-mono font-bold"
+                        placeholder="-1.25"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 block">Cilindro (Cil)</label>
+                      <input
+                        type="text"
+                        value={formOiCilindro}
+                        onChange={(e) => setFormOiCilindro(e.target.value)}
+                        className="w-full p-2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-lg text-xs font-mono font-bold"
+                        placeholder="-0.25"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 block">Eje (°)</label>
+                      <input
+                        type="text"
+                        value={formOiEje}
+                        onChange={(e) => setFormOiEje(e.target.value)}
+                        className="w-full p-2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-lg text-xs font-mono font-bold"
+                        placeholder="85°"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Distancia Pupilar (DP) */}
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 dark:text-zinc-400 block mb-1">
+                    Distancia Pupilar (DP en mm)
+                  </label>
+                  <input
+                    type="text"
+                    value={formDpMm}
+                    onChange={(e) => setFormDpMm(e.target.value)}
+                    className="w-full p-2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-lg text-xs font-mono font-bold"
+                    placeholder="63 mm"
+                  />
+                </div>
+              </div>
+
+              {/* Bloque: Armazón y Sucursal */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                    Armazón Asignado
+                  </label>
+                  <select
+                    value={formArmazon}
+                    onChange={(e) => setFormArmazon(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-xl text-xs font-medium"
+                  >
+                    <option value="EPP-TITAN-001 - Titanium Shield Pro (ANSI Z87.1 / DS 594)">Titanium Shield Pro (EPP)</option>
+                    <option value="BOUT-ACET-002 - Acetato Vintage Lumière (Filtro Blue Block)">Acetato Vintage Lumière</option>
+                    <option value="FLEX-STEEL-003 - Ultralight Flex-Steel (Memoria Térmica)">Ultralight Flex-Steel</option>
+                    <option value="BOUT-METRO-004 - Metropolitan Classic Rimless (Luz Azul 420nm)">Metropolitan Classic Rimless</option>
+                    <option value="EPP-VULC-005 - Vulcan Impact Protect Z87 (TR90 Antiempañante)">Vulcan Impact Protect Z87</option>
+                    <option value="FLEX-AERO-006 - AeroLight Titanium Minimal (Transitions Gen 8)">AeroLight Titanium Minimal</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                    Sucursal de Retiro
+                  </label>
+                  <select
+                    value={formSucursal}
+                    onChange={(e) => setFormSucursal(e.target.value as 'Calama' | 'Antofagasta')}
+                    className="w-full p-2.5 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-xl text-xs font-medium"
+                  >
+                    <option value="Calama">📍 Sucursal Calama</option>
+                    <option value="Antofagasta">📍 Sucursal Antofagasta</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Selector de Motivo (Obligatorio) */}
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400 block mb-1">
+                  Motivo de la Corrección (Obligatorio):
+                </label>
+                <select
+                  value={formMotivoCorreccion}
+                  onChange={(e) => setFormMotivoCorreccion(e.target.value)}
+                  className="w-full p-2.5 bg-amber-500/5 dark:bg-amber-950/20 border border-amber-500/30 rounded-xl text-xs font-bold text-slate-800 dark:text-zinc-200"
+                >
+                  <option value="Error de digitación en tienda">Error de digitación en tienda</option>
+                  <option value="Ajuste de mediciones por optómetra (Garantía clínica)">Ajuste de mediciones por optómetra (Garantía clínica)</option>
+                  <option value="Cambio de armazón solicitado por cliente">Cambio de armazón solicitado por cliente</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-white/5">
+              <button
+                type="button"
+                onClick={() => setModalCorregirOpen(false)}
+                className="px-4 py-2 text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-xl cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleGuardarCorreccion}
+                className="px-5 py-2 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-xl uppercase tracking-wider cursor-pointer shadow-xs"
+              >
+                Guardar Corrección
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal de Confirmación de Anulación / Devolución de Stock ── */}
+      {modalAnularOpen && pedidoActual && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#1C1A18] border border-rose-300 dark:border-rose-900/60 rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-white/5">
+              <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
+                <AlertTriangle size={20} />
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                  Anular Compra y Devolver Stock
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalAnularOpen(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-1 rounded-lg cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-xs text-rose-900 dark:text-rose-200 space-y-1.5">
+              <div className="font-bold flex items-center gap-1.5">
+                <span>⚠️ Advertencia de Reversa Automática</span>
+              </div>
+              <p className="text-[11px] leading-relaxed">
+                Esta acción cancelará el folio <strong>{pedidoActual.folio}</strong> de <strong>{pedidoActual.nombreTitular}</strong>, ajustará la caja comercial y <strong>reintegrará automáticamente +1 unidad</strong> al stock en la sucursal asignada en Kardex.
+              </p>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400 block mb-1">
+                  Motivo de Anulación (Obligatorio):
+                </label>
+                <select
+                  value={formMotivoAnulacion}
+                  onChange={(e) => setFormMotivoAnulacion(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-xl text-xs font-bold"
+                >
+                  <option value="Desistimiento del cliente">Desistimiento del cliente</option>
+                  <option value="Error de cobro/duplicidad">Error de cobro/duplicidad</option>
+                  <option value="Rechazo de cobertura convenio">Rechazo de cobertura convenio</option>
+                </select>
+              </div>
+
+              <div className="p-3 bg-slate-50 dark:bg-zinc-900 rounded-xl border border-slate-200/60 dark:border-zinc-800 text-[11px] space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Total a Reversar:</span>
+                  <span className="font-mono font-bold text-slate-800 dark:text-white">{formatCLP(pedidoActual.saldoTotal)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Armazón a Reponer:</span>
+                  <span className="font-semibold text-slate-700 dark:text-zinc-300">+1 unidad a {pedidoActual.sucursalRetiro || sucursalActiva || 'Calama'}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-white/5">
+              <button
+                type="button"
+                onClick={() => setModalAnularOpen(false)}
+                className="px-4 py-2 text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-xl cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={anulandoEnProceso}
+                onClick={handleConfirmarAnulacion}
+                className="px-5 py-2 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-xl uppercase tracking-wider cursor-pointer shadow-xs disabled:opacity-50"
+              >
+                {anulandoEnProceso ? 'Procesando Reversa...' : 'Confirmar Anulación y Devolver Stock'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

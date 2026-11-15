@@ -9,7 +9,6 @@ import {
   Building2,
   Search,
   CheckCircle2,
-  Lock,
   ArrowUpRight,
   ShieldCheck,
   FileSpreadsheet,
@@ -18,14 +17,16 @@ import {
   Calendar,
   Copy,
   Check,
-  Glasses,
   Wallet,
   Receipt,
   Scale,
   Sparkles,
   MapPin,
   X,
+  Eye,
+  Edit3,
 } from 'lucide-react';
+import { registrarIngresoStock } from '../services/inventarioService';
 import {
   getResumenDashboard,
   getStockCritico,
@@ -132,10 +133,16 @@ export interface TransaccionReciente {
   trabajadorRut: string;
   minera: string;
   sindicato: string;
-  estado: 'Entregado' | 'Fabricación' | 'Pendiente' | 'Retención Laboral';
+  sucursal: 'Calama' | 'Antofagasta';
+  modalidad: 'Convenio' | 'Particular' | 'Isapre';
+  responsable: string;
+  accionRealizada: string;
+  estado: 'Entregado' | 'Fabricación' | 'Pendiente' | 'Retención Laboral' | 'Rectificado' | 'Anulado';
   monto: number;
+  margen: number;
   selloSha256: string | null;
   fecha: string;
+  fechaHoraExacta: string;
 }
 
 const MOCK_TRANSACCIONES_RECIENTES: TransaccionReciente[] = [
@@ -143,56 +150,86 @@ const MOCK_TRANSACCIONES_RECIENTES: TransaccionReciente[] = [
     folio: 'FOLIO-8F1085AD',
     trabajadorNombre: 'Mario Cárdenas González',
     trabajadorRut: '24.533.343-9',
-    minera: 'Minera Escondida Ltda.',
-    sindicato: 'Convenio Minero EPP · DS 594',
+    minera: 'Convenio Minero · Escondida',
+    sindicato: 'Plan EPP Colectivo DS 594',
+    sucursal: 'Calama',
+    modalidad: 'Convenio',
+    responsable: 'Juanita Araya (Vendedor)',
+    accionRealizada: 'Registró venta y entregó lente',
     estado: 'Entregado',
     monto: 185000,
+    margen: 118400,
     selloSha256: '7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069',
     fecha: 'Hoy, 14:10 hrs',
+    fechaHoraExacta: '14/11/2026 · 14:10:33 hrs',
   },
   {
     folio: 'FOLIO-2B4C8901',
     trabajadorNombre: 'Claudia Soto Valenzuela',
     trabajadorRut: '18.923.456-7',
     minera: 'Cliente Particular Boutique',
-    sindicato: 'Sucursal Centro Las Condes',
+    sindicato: 'Lentes Progresivos Blue-Light',
+    sucursal: 'Antofagasta',
+    modalidad: 'Particular',
+    responsable: 'Carlos Rojas (Vendedor)',
+    accionRealizada: 'Registró venta · En Laboratorio',
     estado: 'Fabricación',
     monto: 145000,
+    margen: 87000,
     selloSha256: null,
     fecha: 'Hoy, 11:20 hrs',
+    fechaHoraExacta: '14/11/2026 · 11:20:08 hrs',
   },
   {
     folio: 'FOLIO-4D7E1123',
     trabajadorNombre: 'Roberto Morales Díaz',
     trabajadorRut: '15.482.931-K',
-    minera: 'Convenio Salud · Isapre Colmena',
-    sindicato: 'Plan Cobertura Oftalmológica Codelco',
+    minera: 'Convenio Isapre Colmena / Codelco',
+    sindicato: 'Cobertura Oftalmológica 80%',
+    sucursal: 'Calama',
+    modalidad: 'Isapre',
+    responsable: 'Juanita Araya (Vendedor)',
+    accionRealizada: 'Validó receta y entregó lente',
     estado: 'Entregado',
     monto: 65000,
+    margen: 32000,
     selloSha256: '9a22f4b16c87890e543bca1098ef7723910248ad9081e289c091a117bce1801c',
     fecha: 'Ayer, 16:45 hrs',
+    fechaHoraExacta: '13/11/2026 · 16:45:19 hrs',
   },
   {
     folio: 'FOLIO-7A19BC34',
     trabajadorNombre: 'Patricia Henríquez Palma',
     trabajadorRut: '17.382.910-4',
     minera: 'Atención Clínica Oftalmológica',
-    sindicato: 'Sucursal Providencia',
+    sindicato: 'Examen Visual + Armazón Titanio',
+    sucursal: 'Antofagasta',
+    modalidad: 'Particular',
+    responsable: 'María González (Admin)',
+    accionRealizada: 'Aprobó receta médica',
     estado: 'Fabricación',
     monto: 155000,
+    margen: 96100,
     selloSha256: null,
     fecha: 'Ayer, 09:30 hrs',
+    fechaHoraExacta: '13/11/2026 · 09:30:47 hrs',
   },
   {
     folio: 'FOLIO-9E8821F0',
     trabajadorNombre: 'Esteban Valenzuela Jara',
     trabajadorRut: '19.482.110-2',
-    minera: 'Minera Collahuasi',
-    sindicato: 'Convenio Colectivo Faena',
+    minera: 'Convenio Minero · Collahuasi',
+    sindicato: 'Convenio Colectivo Faena Norte',
+    sucursal: 'Calama',
+    modalidad: 'Convenio',
+    responsable: 'Juanita Araya (Vendedor)',
+    accionRealizada: 'Registró solicitud de paciente',
     estado: 'Pendiente',
     monto: 135000,
+    margen: 81000,
     selloSha256: null,
-    fecha: '08 Nov, 17:15 hrs',
+    fecha: '12 Nov, 17:15 hrs',
+    fechaHoraExacta: '12/11/2026 · 17:15:52 hrs',
   },
 ];
 
@@ -370,6 +407,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
   const [descargandoFolio, setDescargandoFolio] = useState<string | null>(null);
   const [busquedaFolio, setBusquedaFolio] = useState('');
 
+  // ── Filtro Global Interactivo de Sucursal (SpA / Calama / Antofagasta) ──
+  const [filtroSucursal, setFiltroSucursal] = useState<'consolidado' | 'Calama' | 'Antofagasta'>('consolidado');
+  // Conmutador interactivo del gráfico: ventas vs productividad vendedores
+  const [modoGrafico, setModoGrafico] = useState<'ventas' | 'productividad'>('ventas');
+  // Historial de validaciones con sello "Quién Aprobó"
+  const [historialAprobaciones, setHistorialAprobaciones] = useState<
+    Array<{ nombre: string; rut: string; sucursal: string; hora: string }>
+  >([]);
+  // Modal visor rápido de receta OD/OI
+  const [modalVerReceta, setModalVerReceta] = useState<SolicitudReceta | null>(null);
+  const [montoAprobadoSesion, setMontoAprobadoSesion] = useState<number>(0);
+
   // Bandeja de Validación Óptica · Pre-Ingresos de Pacientes
   const [solicitudes, setSolicitudes] = useState<SolicitudReceta[]>(() => getSolicitudesRecetas());
   const [modalObservar, setModalObservar] = useState<{ id: string; nombre: string; rut: string } | null>(null);
@@ -393,8 +442,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
   const handleAprobarSolicitud = (s: SolicitudReceta) => {
     cambiarEstadoSolicitud(s.id, 'APROBADA');
     refrescarSolicitudes();
-    setFeedbackAccion(`✓ Pre-ingreso para ${s.nombre} (${s.rut}) APROBADO. Stock descontado y pedido liberado para laboratorio en sucursal ${s.ciudad}.`);
-    setTimeout(() => setFeedbackAccion(null), 5000);
+    setMontoAprobadoSesion((prev) => prev + (s.monto || 185000));
+    const ahora = new Date();
+    const hora = ahora.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const nombreAdmin = localStorage.getItem('amaru_nombre_admin') || 'María González (Administradora)';
+    setHistorialAprobaciones((prev) => [
+      { nombre: s.nombre, rut: s.rut, sucursal: s.ciudad || 'Calama', hora },
+      ...prev.slice(0, 4),
+    ]);
+    setFeedbackAccion(
+      `✓ Aprobado por ${nombreAdmin} · Hoy a las ${hora} hrs · Sucursal ${s.ciudad}. Stock descontado y pedido liberado para laboratorio.`
+    );
+    setTimeout(() => setFeedbackAccion(null), 6000);
   };
 
   const handleConfirmarObservacion = () => {
@@ -494,25 +553,186 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
     }, 900);
   };
 
-  // Cálculos de KPIs con Conteo Animado Enterprise (Apple Health / Linear style)
-  const targetMontoVentas = resumen?.monto_total_valorizado
-    ? parseFloat(resumen.monto_total_valorizado)
-    : 48650000;
+  // Estado local para persistir transacciones del Dashboard y permitir anulación/corrección en vivo
+  const [transacciones, setTransacciones] = useState<TransaccionReciente[]>(() => {
+    try {
+      const raw = localStorage.getItem('amaru_transacciones_dashboard');
+      if (raw) return JSON.parse(raw);
+    } catch {
+      // ignore
+    }
+    return MOCK_TRANSACCIONES_RECIENTES;
+  });
+
+  // Conteo reactivo de rectificaciones y anulaciones
+  const [conteoAnulaciones, setConteoAnulaciones] = useState<number>(() => {
+    try {
+      const raw = localStorage.getItem('amaru_anulaciones_rectificaciones');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed.length;
+      }
+    } catch {
+      // ignore
+    }
+    return 2;
+  });
+
+  const actualizarConteoAnulaciones = useCallback(() => {
+    try {
+      const raw = localStorage.getItem('amaru_anulaciones_rectificaciones');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setConteoAnulaciones(parsed.length);
+          return;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    setConteoAnulaciones(2);
+  }, []);
+
+  useEffect(() => {
+    actualizarConteoAnulaciones();
+    const handleUpdate = () => actualizarConteoAnulaciones();
+    window.addEventListener('amaru_anulaciones_updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+    return () => {
+      window.removeEventListener('amaru_anulaciones_updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
+  }, [actualizarConteoAnulaciones]);
+
+  // Estados para Modal de Corrección desde Dashboard
+  const [transaccionEditando, setTransaccionEditando] = useState<TransaccionReciente | null>(null);
+  const [motivoCorreccionDash, setMotivoCorreccionDash] = useState<string>('Ajuste de mediciones por optómetra (Garantía clínica)');
+  const [notaCorreccionDash, setNotaCorreccionDash] = useState<string>('');
+
+  // Estados para Modal de Anulación desde Dashboard
+  const [transaccionAnulando, setTransaccionAnulando] = useState<TransaccionReciente | null>(null);
+  const [motivoAnulacionDash, setMotivoAnulacionDash] = useState<string>('Desistimiento del cliente');
+
+  const handleGuardarCorreccionDash = () => {
+    if (!transaccionEditando) return;
+    const ahora = new Date().toLocaleString('es-CL');
+    const hora = new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+    const actualizadas: TransaccionReciente[] = transacciones.map((t) => {
+      if (t.folio === transaccionEditando.folio) {
+        return {
+          ...t,
+          estado: 'Rectificado' as const,
+          responsable: 'María González (Admin)',
+          accionRealizada: `Rectificado hoy a las ${hora} hrs · ${motivoCorreccionDash}`,
+          fechaHoraExacta: `${new Date().toLocaleDateString('es-CL')} · ${new Date().toLocaleTimeString('es-CL')} hrs`,
+        };
+      }
+      return t;
+    });
+
+    setTransacciones(actualizadas);
+    localStorage.setItem('amaru_transacciones_dashboard', JSON.stringify(actualizadas));
+
+    try {
+      const raw = localStorage.getItem('amaru_anulaciones_rectificaciones');
+      const current = raw ? JSON.parse(raw) : [];
+      const reg = {
+        id: `REG-DASH-${Date.now()}`,
+        tipo: 'RECTIFICACION',
+        folio: transaccionEditando.folio,
+        paciente: transaccionEditando.trabajadorNombre,
+        rut: transaccionEditando.trabajadorRut,
+        fechaHoraExacta: ahora,
+        responsable: 'María González (Administradora)',
+        motivo: motivoCorreccionDash,
+        detalles: notaCorreccionDash || 'Ajuste de graduación y montura desde Resumen del Negocio',
+        sucursal: transaccionEditando.sucursal,
+      };
+      const updated = [reg, ...current];
+      localStorage.setItem('amaru_anulaciones_rectificaciones', JSON.stringify(updated));
+      window.dispatchEvent(new Event('amaru_anulaciones_updated'));
+    } catch {
+      // ignore
+    }
+
+    setFeedbackAccion(`✓ Venta ${transaccionEditando.folio} rectificada con éxito en tiempo real.`);
+    setTransaccionEditando(null);
+    setTimeout(() => setFeedbackAccion(null), 4500);
+  };
+
+  const handleConfirmarAnulacionDash = () => {
+    if (!transaccionAnulando) return;
+    const ahora = new Date().toLocaleString('es-CL');
+    const actualizadas: TransaccionReciente[] = transacciones.map((t) => {
+      if (t.folio === transaccionAnulando.folio) {
+        return {
+          ...t,
+          estado: 'Anulado' as const,
+          responsable: 'María González (Admin)',
+          accionRealizada: `Anulado por María González · +1 devuelto a stock (${motivoAnulacionDash})`,
+          fechaHoraExacta: `${new Date().toLocaleDateString('es-CL')} · ${new Date().toLocaleTimeString('es-CL')} hrs`,
+        };
+      }
+      return t;
+    });
+
+    setTransacciones(actualizadas);
+    localStorage.setItem('amaru_transacciones_dashboard', JSON.stringify(actualizadas));
+
+    // Devolver +1 unidad a inventario y Kardex
+    registrarIngresoStock(
+      'EPP-TITAN-001',
+      transaccionAnulando.sucursal,
+      1,
+      `REV-${transaccionAnulando.folio.replace('FOLIO-', '')}`,
+      'María González (Administradora)'
+    );
+
+    try {
+      const raw = localStorage.getItem('amaru_anulaciones_rectificaciones');
+      const current = raw ? JSON.parse(raw) : [];
+      const reg = {
+        id: `REG-DASH-${Date.now()}`,
+        tipo: 'ANULACION',
+        folio: transaccionAnulando.folio,
+        paciente: transaccionAnulando.trabajadorNombre,
+        rut: transaccionAnulando.trabajadorRut,
+        fechaHoraExacta: ahora,
+        responsable: 'María González (Administradora)',
+        motivo: motivoAnulacionDash,
+        detalles: `Reversa automática y +1 reintegrado al inventario de ${transaccionAnulando.sucursal}`,
+        sucursal: transaccionAnulando.sucursal,
+      };
+      const updated = [reg, ...current];
+      localStorage.setItem('amaru_anulaciones_rectificaciones', JSON.stringify(updated));
+      window.dispatchEvent(new Event('amaru_anulaciones_updated'));
+    } catch {
+      // ignore
+    }
+
+    setFeedbackAccion(`✓ Venta ${transaccionAnulando.folio} ANULADA. Se sumó +1 al stock de ${transaccionAnulando.sucursal}.`);
+    setTransaccionAnulando(null);
+    setTimeout(() => setFeedbackAccion(null), 5000);
+  };
+
+  // KPIs dinámicos según filtro de sucursal
+  const kpiData = {
+    consolidado: { ventas: 24680000, margen: 15795200, cxc: 14850000, lentes: 38, enLab: 6 },
+    Calama: { ventas: 16450000, margen: 10528000, cxc: 9200000, lentes: 24, enLab: 4 },
+    Antofagasta: { ventas: 8230000, margen: 5267200, cxc: 5650000, lentes: 14, enLab: 2 },
+  };
+  const kpi = kpiData[filtroSucursal];
+
+  const montoBackend = resumen?.monto_total_valorizado ? parseFloat(resumen.monto_total_valorizado) : 0;
+  const montoBase = montoBackend > 0 ? montoBackend : kpi.ventas;
+  const targetMontoVentas = montoBase + montoAprobadoSesion;
   const animVentas = useAnimatedNumber(targetMontoVentas, 850);
-
-  const targetSolicitudes = resumen?.total_solicitudes ?? 348;
-  const animSolicitudes = useAnimatedNumber(targetSolicitudes, 750);
-
-  const targetFiniquitos = 14850000;
+  const animMargen = useAnimatedNumber(kpi.margen, 800);
+  const targetFiniquitos = kpi.cxc;
   const animFiniquitos = useAnimatedNumber(targetFiniquitos, 800);
-
-  const targetStock = stock?.total_alertas ?? 3;
-  const animStock = useAnimatedNumber(targetStock, 600);
-
   const totalVentasConvenio = formatCLP(animVentas);
-  const totalEppEntregados = `${animSolicitudes} ud.`;
   const totalFiniquitosRecuperados = formatCLP(animFiniquitos);
-  const totalAlertasStock = animStock;
 
   // Cálculos para el gráfico de 7 días
   const maxBarra = Math.max(...MOCK_DATOS_7_DIAS.map((d) => d.faena + d.sucursal), 65);
@@ -521,13 +741,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
   const totalGeneral7Dias = totalFaena7Dias + totalSucursal7Dias;
   const pctFaena = Math.round((totalFaena7Dias / totalGeneral7Dias) * 100);
 
-  // Filtrado de la tabla reciente
-  const transaccionesFiltradas = MOCK_TRANSACCIONES_RECIENTES.filter(
+  // Filtrado de la tabla reciente por texto y por sucursal seleccionada
+  const transaccionesFiltradas = transacciones.filter(
     (t) =>
-      t.folio.toLowerCase().includes(busquedaFolio.toLowerCase()) ||
-      t.trabajadorNombre.toLowerCase().includes(busquedaFolio.toLowerCase()) ||
-      t.trabajadorRut.toLowerCase().includes(busquedaFolio.toLowerCase()) ||
-      t.minera.toLowerCase().includes(busquedaFolio.toLowerCase())
+      (filtroSucursal === 'consolidado' || t.sucursal === filtroSucursal) &&
+      (
+        t.folio.toLowerCase().includes(busquedaFolio.toLowerCase()) ||
+        t.trabajadorNombre.toLowerCase().includes(busquedaFolio.toLowerCase()) ||
+        t.trabajadorRut.toLowerCase().includes(busquedaFolio.toLowerCase()) ||
+        t.minera.toLowerCase().includes(busquedaFolio.toLowerCase()) ||
+        t.responsable.toLowerCase().includes(busquedaFolio.toLowerCase())
+      )
   );
 
   return (
@@ -541,10 +765,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
             </span>
             <div>
               <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight flex items-center gap-3">
-                Panel de Control Gerencial
+                Resumen General de Óptica Amaru
                 <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[10px] font-mono font-bold uppercase tracking-wider">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Clínica · Boutique & Convenios
+                  Calama & Antofagasta
                 </span>
               </h1>
               <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1 flex items-center gap-2">
@@ -588,6 +812,40 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
         </div>
       </div>
 
+      {/* ── Filtro Global Interactivo a 1 Clic (Todas las Sucursales vs Calama vs Antofagasta) ── */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-white/90 dark:bg-[#1C1A18]/90 border border-slate-200/80 dark:border-white/10 shadow-xs">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="text-xs font-semibold text-slate-600 dark:text-zinc-400">
+            Vista Ejecutiva Activa:
+          </span>
+          <span className="text-xs font-black text-slate-900 dark:text-white">
+            {filtroSucursal === 'consolidado' ? '🌐 Todas las Sucursales (Calama + Antofagasta)' : `📍 Sucursal ${filtroSucursal}`}
+          </span>
+        </div>
+
+        <div className="flex items-center p-1 bg-slate-100 dark:bg-black/40 border border-slate-200/80 dark:border-white/10 rounded-xl gap-1 text-xs self-stretch sm:self-auto">
+          {([
+            { key: 'consolidado', label: '🌐 Todas las Sucursales (Total)' },
+            { key: 'Calama', label: '📍 Sucursal Calama' },
+            { key: 'Antofagasta', label: '📍 Sucursal Antofagasta' },
+          ] as const).map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setFiltroSucursal(key)}
+              className={`flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg font-bold transition-all duration-200 cursor-pointer whitespace-nowrap text-xs ${
+                filtroSucursal === key
+                  ? 'bg-white dark:bg-[#2A2522] text-[#B85D19] shadow-xs'
+                  : 'text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Banner de feedback o error si existe */}
       {feedbackAccion && (
         <div className="bg-emerald-50/90 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/60 text-emerald-800 dark:text-emerald-300 text-xs rounded-xl p-3.5 flex items-center justify-between shadow-xs animate-in fade-in duration-200">
@@ -613,7 +871,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
         </div>
       )}
 
-      {/* ── Bandeja de Validación Óptica · Pre-Ingresos de Pacientes (Portal ➔ Admin) ── */}
+      {/* ── Recetas de Clientes por Aprobar (Portal ➔ Admin) ── */}
       <div className="card-zenith rounded-3xl p-6 relative overflow-hidden border border-amber-500/30 bg-gradient-to-br from-amber-500/[0.04] via-orange-500/[0.02] to-transparent shadow-md">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-white/5">
           <div className="flex items-center gap-2.5">
@@ -623,7 +881,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
             <div>
               <div className="flex items-center gap-2.5">
                 <h2 className="text-base sm:text-lg font-black tracking-tight text-slate-900 dark:text-white">
-                  Bandeja de Validación Óptica · Pre-Ingresos de Pacientes
+                  Recetas de Clientes por Aprobar
                 </h2>
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30 flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
@@ -633,7 +891,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
-                Revisión optométrica de recetas médicas, validación de dioptrías y liberación directa a laboratorio con descuento de stock.
+                Revisa las recetas enviadas por clientes desde la web y autoriza su envío a laboratorio.
               </p>
             </div>
           </div>
@@ -746,6 +1004,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
 
                   <td className="py-3 pl-2 text-right">
                     <div className="flex items-center justify-end gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setModalVerReceta(sol)}
+                        className="bg-sky-500/10 hover:bg-sky-500/20 text-sky-700 dark:text-sky-300 border border-sky-500/30 font-bold px-2.5 py-1.5 rounded-xl text-xs flex items-center gap-1 transition-all cursor-pointer"
+                        title="Ver dioptrías OD/OI y receta médica del paciente"
+                      >
+                        <Eye size={12} />
+                        <span>👁️ Ver Receta (OD/OI)</span>
+                      </button>
+
                       {sol.estado !== 'APROBADA' ? (
                         <>
                           <button
@@ -755,7 +1023,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
                             title="Aprobar receta, descontar stock e iniciar fabricación en laboratorio"
                           >
                             <CheckCircle2 size={13} />
-                            <span>Aprobar y Descontar Stock</span>
+                            <span>✓ Aprobar y Descontar Stock</span>
                           </button>
 
                           <button
@@ -781,43 +1049,70 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
             </tbody>
           </table>
         </div>
+
+        {/* Historial reciente de validaciones con sello de Quién Aprobó */}
+        {historialAprobaciones.length > 0 && (
+          <div className="mt-4 pt-3 border-t border-slate-100 dark:border-white/5 space-y-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+              Historial de Aprobaciones Recientes:
+            </span>
+            <div className="space-y-1.5">
+              {historialAprobaciones.map((h, i) => (
+                <div
+                  key={i}
+                  className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-800 dark:text-emerald-300"
+                >
+                  <span className="flex items-center gap-2">
+                    <CheckCircle2 size={14} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <span>
+                      Aprobado por <strong>{localStorage.getItem('amaru_nombre_admin') || 'María González (Administradora)'}</strong> · Paciente: <strong>{h.nombre}</strong> ({h.rut})
+                    </span>
+                  </span>
+                  <span className="font-mono text-[11px] font-bold bg-emerald-500/20 px-2 py-0.5 rounded-md">
+                    Hoy a las {h.hora} hrs · 📍 Sucursal {h.sucursal}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* ── 2. Tarjetas de KPI (Top Row) con Sparklines Decorativos ── */}
+      {/* ── 2. Tarjetas de KPI (Top Row) con Sparklines Decorativos y Cifras Vivas ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 animate-stagger-1">
-        {/* KPI 1: Ventas por Convenio (CLP) */}
+        {/* KPI 1: VENTAS TOTALES DEL MES */}
         <KpiCard
-          titulo="Ventas por Convenio (CLP)"
+          titulo="VENTAS TOTALES DEL MES"
           valor={totalVentasConvenio}
-          indicador="+12.4% vs mes anterior"
+          indicador="+14.8% vs mes anterior"
           tipoIndicador="positivo"
-          subtexto="Convenio Colectivo Minero al día"
+          subtexto="Convenios corporativos y ventas particulares"
           icono={<Wallet size={20} />}
           iconBgClass="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/80 dark:border-emerald-800/40"
           iconColorClass="text-emerald-600 dark:text-emerald-400"
           sparklineVariant="ventas"
         />
 
-        {/* KPI 2: EPP Ópticos Entregados */}
+        {/* KPI 2: GANANCIA LÍQUIDA ESTIMADA */}
         <KpiCard
-          titulo="EPP Ópticos Entregados"
-          valor={totalEppEntregados}
-          indicador="+8.2% vs objetivo mensual"
+          titulo="GANANCIA LÍQUIDA ESTIMADA"
+          valor={formatCLP(animMargen)}
+          indicador={`${Math.round((kpi.margen / kpi.ventas) * 100).toFixed(1)}% Margen Comercial`}
           tipoIndicador="positivo"
-          subtexto="326 en Faena · 22 en Sucursal"
-          icono={<Glasses size={20} />}
+          subtexto="Ingresos menos costo de armazones y cristales"
+          icono={<TrendingUp size={20} />}
           iconBgClass="bg-blue-50 dark:bg-blue-950/40 border border-blue-200/80 dark:border-blue-800/40"
           iconColorClass="text-blue-600 dark:text-blue-400"
           sparklineVariant="epp"
         />
 
-        {/* KPI 3: Retenciones / Finiquitos */}
+        {/* KPI 3: POR COBRAR A EMPRESAS (CONVENIOS) */}
         <KpiCard
-          titulo="Retenciones / Finiquitos"
+          titulo="POR COBRAR A EMPRESAS (CONVENIOS)"
           valor={totalFiniquitosRecuperados}
-          indicador="18 casos Art. 58"
+          indicador={`Ver ${filtroSucursal === 'consolidado' ? 18 : filtroSucursal === 'Calama' ? 11 : 7} cobros pendientes`}
           tipoIndicador="alerta"
-          subtexto="Cobro preferente DS 594"
+          subtexto="Descuentos por planilla y convenios mineros"
           icono={<Receipt size={20} />}
           iconBgClass="bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/60"
           iconColorClass="text-amber-600 dark:text-amber-400"
@@ -825,30 +1120,56 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
           sparklineVariant="finiquito"
         />
 
-        {/* KPI 4: Stock Crítico (Armazones) */}
+        {/* KPI 4: LENTES ENTREGADOS Y EN PROCESO */}
         <KpiCard
-          titulo="Stock Crítico (Armazones)"
-          valor={`${totalAlertasStock} Modelos`}
-          indicador={totalAlertasStock > 0 ? `${totalAlertasStock} SKU bajo umbral` : 'Stock OK'}
-          tipoIndicador={totalAlertasStock > 0 ? 'peligro' : 'positivo'}
-          subtexto="Umbral mínimo: ≤ 5 ud."
+          titulo="LENTES ENTREGADOS Y EN PROCESO"
+          valor={`${kpi.lentes} Lentes Entregados`}
+          indicador={`${kpi.enLab} en Laboratorio · Stock OK`}
+          tipoIndicador="positivo"
+          subtexto={stock ? `${stock.total_alertas} alertas de stock crítico` : 'Stock saludable en ambas sucursales'}
           icono={<AlertTriangle size={20} />}
-          iconBgClass={
-            totalAlertasStock > 0
-              ? 'bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900/60'
-              : 'bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200'
-          }
-          iconColorClass={
-            totalAlertasStock > 0
-              ? 'text-red-600 dark:text-red-400'
-              : 'text-emerald-600 dark:text-emerald-400'
-          }
-          borderAccentClass={totalAlertasStock > 0 ? 'border-red-500/20 dark:border-red-900/30' : ''}
+          iconBgClass="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200"
+          iconColorClass="text-emerald-600 dark:text-emerald-400"
           sparklineVariant="stock"
         />
       </div>
 
-      {/* ── 3. Sección Central (Gráficos): Entregas en Faena vs. Sucursal ── */}
+      {/* ── Barra Ejecutiva: Arqueo Rápido de Medios de Pago y Control de Calidad ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 p-4 rounded-2xl bg-white/90 dark:bg-[#1C1A18]/90 border border-slate-200/80 dark:border-white/10 shadow-xs animate-stagger-2">
+        <div className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200/60 dark:border-white/5">
+          <div className="p-2 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 font-bold shrink-0 text-base">💳</div>
+          <div className="min-w-0">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block truncate">Tarjetas / Webpay</span>
+            <span className="font-mono text-sm font-black text-slate-900 dark:text-white">$9.450.000</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200/60 dark:border-white/5">
+          <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold shrink-0 text-base">🏦</div>
+          <div className="min-w-0">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block truncate">Transferencias / Efectivo</span>
+            <span className="font-mono text-sm font-black text-slate-900 dark:text-white">$5.120.000</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200/60 dark:border-white/5">
+          <div className="p-2 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 font-bold shrink-0 text-base">🏢</div>
+          <div className="min-w-0">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block truncate">Convenios Planilla</span>
+            <span className="font-mono text-sm font-black text-slate-900 dark:text-white">$10.110.000</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl bg-amber-500/10 dark:bg-amber-950/20 border border-amber-500/25">
+          <div className="p-2 rounded-lg bg-amber-500/20 text-amber-700 dark:text-amber-300 font-bold shrink-0 text-base">🛠️</div>
+          <div className="min-w-0">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-400 block truncate">Rectificaciones / Anulaciones</span>
+            <span className="font-mono text-sm font-black text-amber-900 dark:text-amber-200">{conteoAnulaciones} casos</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── 3. Sección Central (Gráficos Dinámicos): Ventas o Productividad ── */}
       <div className="card-zenith rounded-2xl p-6 transition-colors animate-stagger-2">
         {/* Header del gráfico y controles */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-slate-100 dark:border-zinc-800/80">
@@ -858,26 +1179,32 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
                 <TrendingUp size={16} />
               </span>
               <h2 className="text-base font-extrabold text-slate-900 dark:text-white tracking-tight">
-                Entregas en Faena vs. Sucursal (Últimos 7 Días)
+                {modoGrafico === 'ventas'
+                  ? 'Comparativa de Ventas: Calama vs. Antofagasta'
+                  : 'Rendimiento de Ventas por Vendedor'}
               </h2>
             </div>
             <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1">
-              Volumen diario de dispensación de lentes EPP certificados bajo normativa DS 594.
+              {modoGrafico === 'ventas'
+                ? 'Volumen de ventas comparativo por sucursal durante los últimos 7 días.'
+                : 'Desempeño diario de Juanita Araya, Carlos Rojas y equipo en atención presencial y entrega de lentes.'}
             </p>
           </div>
 
           {/* Leyenda y Filtro */}
           <div className="flex items-center gap-4 flex-wrap">
-            <div className="flex items-center gap-3 text-xs">
-              <span className="flex items-center gap-1.5 font-medium text-slate-700 dark:text-zinc-300">
-                <span className="w-3 h-3 rounded-sm bg-amaru-copper" />
-                Faena Minera ({pctFaena}%)
-              </span>
-              <span className="flex items-center gap-1.5 font-medium text-slate-700 dark:text-zinc-300">
-                <span className="w-3 h-3 rounded-sm bg-slate-400 dark:bg-zinc-600" />
-                Sucursal ({100 - pctFaena}%)
-              </span>
-            </div>
+            {modoGrafico === 'ventas' && (
+              <div className="flex items-center gap-3 text-xs">
+                <span className="flex items-center gap-1.5 font-medium text-slate-700 dark:text-zinc-300">
+                  <span className="w-3 h-3 rounded-sm bg-amaru-copper" />
+                  Calama ({pctFaena}%)
+                </span>
+                <span className="flex items-center gap-1.5 font-medium text-slate-700 dark:text-zinc-300">
+                  <span className="w-3 h-3 rounded-sm bg-slate-400 dark:bg-zinc-600" />
+                  Antofagasta ({100 - pctFaena}%)
+                </span>
+              </div>
+            )}
 
             <div className="flex items-center bg-slate-100 dark:bg-zinc-900 p-1 rounded-xl border border-slate-200/80 dark:border-zinc-800 text-xs">
               <button
@@ -903,14 +1230,104 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
                 Mes en Curso
               </button>
             </div>
+
+            {/* Conmutador 2: Calama vs Antofagasta o Productividad por Vendedor */}
+            <div className="flex items-center bg-slate-100 dark:bg-zinc-900 p-1 rounded-xl border border-slate-200/80 dark:border-zinc-800 text-xs">
+              <button
+                type="button"
+                onClick={() => setModoGrafico('ventas')}
+                className={`px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer ${
+                  modoGrafico === 'ventas'
+                    ? 'bg-white dark:bg-[#1C1A18] text-slate-900 dark:text-white shadow-xs'
+                    : 'text-slate-500 dark:text-zinc-400 hover:text-slate-900'
+                }`}
+              >
+                📊 Calama vs. Antofagasta
+              </button>
+              <button
+                type="button"
+                onClick={() => setModoGrafico('productividad')}
+                className={`px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer ${
+                  modoGrafico === 'productividad'
+                    ? 'bg-white dark:bg-[#1C1A18] text-slate-900 dark:text-white shadow-xs'
+                    : 'text-slate-500 dark:text-zinc-400 hover:text-slate-900'
+                }`}
+              >
+                👩‍💼 Productividad Vendedores
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Resumen numérico en la parte superior del gráfico */}
+        {modoGrafico === 'productividad' ? (
+          <div className="mt-4 p-5 rounded-2xl bg-slate-50/70 dark:bg-zinc-900/50 border border-slate-200/60 dark:border-zinc-800/60 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200/60 dark:border-zinc-800">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                Rendimiento y Cumplimiento del Equipo en Turno Hoy (Calama & Antofagasta)
+              </span>
+              <span className="text-[11px] font-mono font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                ✓ 2 Vendedores en Turno Activo
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-[10px] font-bold uppercase text-slate-400 border-b border-slate-200 dark:border-zinc-800">
+                    <th className="pb-2 text-left">Vendedor / Sucursal</th>
+                    <th className="pb-2 text-center">Ventas Realizadas Hoy</th>
+                    <th className="pb-2 text-center">Entregas Presenciales</th>
+                    <th className="pb-2 text-center">Ingresos de Stock (Guías)</th>
+                    <th className="pb-2 text-right">Monto Facturado Hoy</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-zinc-800 font-sans">
+                  <tr className="hover:bg-slate-100/50 dark:hover:bg-zinc-800/50 transition-colors">
+                    <td className="py-3">
+                      <div className="font-bold text-slate-900 dark:text-white">👩 Juanita Araya</div>
+                      <div className="text-[10px] text-amber-700 dark:text-amber-400 font-semibold">📍 Sucursal Calama (Turno Mañana/Tarde)</div>
+                    </td>
+                    <td className="py-3 text-center">
+                      <span className="font-mono font-bold text-sm text-amaru-copper bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20">8 ventas</span>
+                    </td>
+                    <td className="py-3 text-center">
+                      <span className="font-mono font-bold text-sm text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">5 entregas</span>
+                    </td>
+                    <td className="py-3 text-center">
+                      <span className="font-mono font-bold text-sm text-blue-600 dark:text-blue-400 bg-blue-500/10 px-2.5 py-1 rounded-lg border border-blue-500/20">2 guías</span>
+                    </td>
+                    <td className="py-3 text-right">
+                      <span className="font-mono font-black text-sm text-slate-900 dark:text-white">$1.820.000 CLP</span>
+                    </td>
+                  </tr>
+                  <tr className="hover:bg-slate-100/50 dark:hover:bg-zinc-800/50 transition-colors">
+                    <td className="py-3">
+                      <div className="font-bold text-slate-900 dark:text-white">👨 Carlos Rojas Morales</div>
+                      <div className="text-[10px] text-amber-700 dark:text-amber-400 font-semibold">📍 Sucursal Antofagasta (Turno Completo)</div>
+                    </td>
+                    <td className="py-3 text-center">
+                      <span className="font-mono font-bold text-sm text-amaru-copper bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20">5 ventas</span>
+                    </td>
+                    <td className="py-3 text-center">
+                      <span className="font-mono font-bold text-sm text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">3 entregas</span>
+                    </td>
+                    <td className="py-3 text-center">
+                      <span className="font-mono font-bold text-sm text-blue-600 dark:text-blue-400 bg-blue-500/10 px-2.5 py-1 rounded-lg border border-blue-500/20">1 guía</span>
+                    </td>
+                    <td className="py-3 text-right">
+                      <span className="font-mono font-black text-sm text-slate-900 dark:text-white">$1.150.000 CLP</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Resumen numérico en la parte superior del gráfico */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 my-5 p-4 rounded-xl bg-slate-50/70 dark:bg-zinc-900/50 border border-slate-200/60 dark:border-zinc-800/60 text-xs">
           <div>
             <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-              Total Faena (7D)
+              Total Calama (7D)
             </span>
             <p className="text-base font-extrabold text-amaru-copper font-mono mt-0.5">
               {totalFaena7Dias} ud.
@@ -918,7 +1335,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
           </div>
           <div>
             <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-              Total Sucursal (7D)
+              Total Antofagasta (7D)
             </span>
             <p className="text-base font-extrabold text-slate-600 dark:text-zinc-300 font-mono mt-0.5">
               {totalSucursal7Dias} ud.
@@ -1033,11 +1450,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
                   :
                 </span>
                 <span className="font-semibold text-amaru-copper">
-                  {diaSeleccionado.faena} en faena
+                  {diaSeleccionado.faena} en Calama
                 </span>
                 <span>+</span>
                 <span className="font-semibold text-slate-700 dark:text-zinc-300">
-                  {diaSeleccionado.sucursal} en sucursal
+                  {diaSeleccionado.sucursal} en Antofagasta
                 </span>
                 <span>=</span>
                 <span className="font-extrabold text-slate-900 dark:text-white font-mono">
@@ -1046,7 +1463,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
               </div>
 
               <div className="text-[11px] text-slate-400">
-                Tasa de efectividad faena:{' '}
+                Participación Calama:{' '}
                 <strong className="text-emerald-600 dark:text-emerald-400 font-mono">
                   {Math.round(
                     (diaSeleccionado.faena / (diaSeleccionado.faena + diaSeleccionado.sucursal)) *
@@ -1058,7 +1475,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
             </div>
           )}
         </div>
-      </div>
+      </>
+    )}
+  </div>
 
       {/* ── 4. Sección Inferior (Actividad Reciente): Tabla Limpia con 5 Transacciones ── */}
       <div className="card-zenith rounded-2xl p-6 transition-colors animate-stagger-3">
@@ -1069,11 +1488,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
                 <FileCheck2 size={16} />
               </span>
               <h2 className="text-base font-extrabold text-slate-900 dark:text-white tracking-tight">
-                Actividad Reciente y Trazabilidad Operativa
+                Historial de Ventas y Responsables (Quién, Cuándo y Hora)
               </h2>
             </div>
             <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1">
-              Últimas solicitudes procesadas: Faenas Mineras, Clínicas Asociadas y Óptica Boutique con sello SHA-256.
+              Últimas solicitudes y ventas registradas en Calama y Antofagasta.
             </p>
           </div>
 
@@ -1093,24 +1512,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
           </div>
         </div>
 
-        {/* Tabla Responsiva */}
+        {/* Tabla Responsiva: Bitácora de Actividad y Ventas */}
         <div className="overflow-x-auto rounded-xl border border-slate-200/80 dark:border-zinc-800 shadow-2xs">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50/80 dark:bg-zinc-900/60 text-slate-500 dark:text-zinc-400 uppercase tracking-wider font-semibold border-b border-slate-200/80 dark:border-zinc-800 text-[11px]">
               <tr>
-                <th className="px-4 py-3.5">Folio</th>
-                <th className="px-4 py-3.5">Paciente / RUT</th>
-                <th className="px-4 py-3.5">Modalidad / Convenio</th>
-                <th className="px-4 py-3.5">Estado</th>
-                <th className="px-4 py-3.5">Sello de Integridad</th>
-                <th className="px-4 py-3.5 text-right">Acciones</th>
+                <th className="px-4 py-3.5">Folio & Fecha/Hora Exacta</th>
+                <th className="px-4 py-3.5">Paciente & RUT</th>
+                <th className="px-4 py-3.5">Sucursal & Modalidad</th>
+                <th className="px-4 py-3.5">Responsable (Quién lo hizo)</th>
+                <th className="px-4 py-3.5">Monto & Margen</th>
+                <th className="px-4 py-3.5 text-right">Estado & Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-zinc-800/80 bg-white dark:bg-[#1C1A18]">
               {transaccionesFiltradas.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-4 py-10 text-center text-slate-400 dark:text-zinc-500">
-                    No se encontraron transacciones que coincidan con la búsqueda.
+                    No se encontraron transacciones en esta sucursal que coincidan con la búsqueda.
                   </td>
                 </tr>
               ) : (
@@ -1122,7 +1541,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
                       key={t.folio}
                       className={`hover:bg-slate-50/70 dark:hover:bg-zinc-900/40 transition-colors animate-stagger-${(idx % 4) + 1}`}
                     >
-                      {/* 1. Folio */}
+                      {/* 1. FOLIO & FECHA/HORA EXACTA */}
                       <td className="px-4 py-3.5 whitespace-nowrap">
                         <div className="flex items-center gap-1.5">
                           <span className="font-mono text-xs font-bold text-amaru-copper bg-amaru-copper/10 dark:bg-amaru-copper/20 px-2 py-0.5 rounded-md border border-amaru-copper/20">
@@ -1141,12 +1560,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
                             )}
                           </button>
                         </div>
-                        <span className="text-[10px] text-slate-400 dark:text-zinc-500 block mt-0.5">
-                          {t.fecha}
+                        <span className="text-[10px] text-slate-500 dark:text-zinc-400 font-mono block mt-0.5">
+                          {t.fechaHoraExacta}
                         </span>
                       </td>
 
-                      {/* 2. Trabajador con Avatar de Iniciales de Alto Contraste */}
+                      {/* 2. PACIENTE & RUT */}
                       <td className="px-4 py-3.5">
                         <div className="flex items-center gap-2.5">
                           <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold font-mono tracking-wider bg-gradient-to-br from-amber-500/20 via-orange-500/25 to-[#B34B0C]/30 text-[#9E3F08] dark:text-orange-300 border border-amaru-copper/30 dark:border-orange-500/40 shrink-0 shadow-2xs">
@@ -1163,107 +1582,142 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
                         </div>
                       </td>
 
-                      {/* 3. Minera */}
+                      {/* 3. SUCURSAL & MODALIDAD */}
+                      <td className="px-4 py-3.5 whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-500/20 mb-1">
+                          📍 {t.sucursal}
+                        </span>
+                        <div>
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                              t.modalidad === 'Convenio'
+                                ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-800/50'
+                                : t.modalidad === 'Isapre'
+                                ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/50 dark:text-purple-300 dark:border-purple-800/50'
+                                : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/50'
+                            }`}
+                          >
+                            {t.modalidad}
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* 4. RESPONSABLE (QUIÉN LO HIZO) */}
                       <td className="px-4 py-3.5">
-                        <div className="font-semibold text-slate-800 dark:text-zinc-200 text-xs">
-                          {t.minera}
+                        <div className="font-bold text-slate-900 dark:text-white text-xs">
+                          {t.responsable}
                         </div>
-                        <div className="text-[11px] text-slate-500 dark:text-zinc-400">
-                          {t.sindicato}
+                        <div className="text-[11px] text-slate-500 dark:text-zinc-400 mt-0.5 italic">
+                          {t.accionRealizada}
                         </div>
                       </td>
 
-                      {/* 4. Estado */}
+                      {/* 5. MONTO & MARGEN */}
                       <td className="px-4 py-3.5 whitespace-nowrap">
-                        {t.estado === 'Entregado' && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/50">
-                            <CheckCircle2 size={11} className="text-emerald-500" />
-                            Entregado
-                          </span>
-                        )}
-                        {t.estado === 'Fabricación' && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-800/50">
-                            <Package size={11} className="text-blue-500" />
-                            Fabricación
-                          </span>
-                        )}
-                        {t.estado === 'Pendiente' && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700">
-                            <Clock size={11} className="text-slate-500" />
-                            Pendiente
-                          </span>
-                        )}
-                        {t.estado === 'Retención Laboral' && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700/60">
-                            <AlertTriangle size={11} className="text-amber-600" />
-                            Finiquito
-                          </span>
-                        )}
+                        <div className="font-mono font-bold text-slate-900 dark:text-white text-xs">
+                          ${t.monto.toLocaleString('es-CL')} CLP
+                        </div>
+                        <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold font-mono">
+                          Margen: +${t.margen.toLocaleString('es-CL')}
+                        </div>
                       </td>
 
-                      {/* 5. Sello de Integridad */}
-                      <td className="px-4 py-3.5 whitespace-nowrap">
-                        {estaSellado ? (
-                          <div className="flex items-center gap-1.5">
-                            <div className="p-1 rounded-md bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400 border border-emerald-200/80 dark:border-emerald-800/40">
-                              <Lock size={13} />
-                            </div>
-                            <div>
-                              <span className="font-bold text-[11px] text-emerald-700 dark:text-emerald-400 block">
-                                Sellado SHA-256
-                              </span>
-                              <span
-                                onClick={() => handleCopiarHash(t.selloSha256!)}
-                                title="Clic para copiar hash completo"
-                                className="font-mono text-[10px] text-slate-400 hover:text-amaru-copper cursor-pointer flex items-center gap-1"
-                              >
-                                {t.selloSha256!.slice(0, 8)}...{t.selloSha256!.slice(-6)}
-                                {hashCopiado === t.selloSha256 ? (
-                                  <Check size={10} className="text-emerald-500" />
-                                ) : (
-                                  <Copy size={10} />
-                                )}
-                              </span>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-1.5 text-slate-400 dark:text-zinc-500">
-                            <div className="p-1 rounded-md bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700">
-                              <Clock size={13} />
-                            </div>
-                            <span className="text-[11px] font-medium">En proceso</span>
-                          </div>
-                        )}
-                      </td>
-
-                      {/* 6. Acciones */}
+                      {/* 6. ESTADO & ACCIONES */}
                       <td className="px-4 py-3.5 text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {estaSellado && (
-                            <button
-                              type="button"
-                              onClick={() => handleDescargarComprobante(t.folio)}
-                              disabled={descargandoFolio === t.folio}
-                              title="Descargar Comprobante PDF de Entrega"
-                              className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-white hover:bg-slate-50 dark:bg-zinc-800 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-200 shadow-2xs transition-all cursor-pointer flex items-center gap-1"
-                            >
-                              <Download size={11} className="text-amaru-copper" />
-                              <span>PDF</span>
-                            </button>
+                        <div className="flex flex-col items-end gap-1.5">
+                          {t.estado === 'Entregado' && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/50">
+                              <CheckCircle2 size={11} className="text-emerald-500" />
+                              Entregado
+                            </span>
+                          )}
+                          {t.estado === 'Fabricación' && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-800/50">
+                              <Package size={11} className="text-blue-500" />
+                              Fabricación
+                            </span>
+                          )}
+                          {t.estado === 'Pendiente' && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700">
+                              <Clock size={11} className="text-slate-500" />
+                              Pendiente
+                            </span>
+                          )}
+                          {t.estado === 'Retención Laboral' && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700/60">
+                              <AlertTriangle size={11} className="text-amber-600" />
+                              Finiquito
+                            </span>
+                          )}
+                          {t.estado === 'Rectificado' && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700/60">
+                              <Edit3 size={11} className="text-amber-600" />
+                              Rectificado
+                            </span>
+                          )}
+                          {t.estado === 'Anulado' && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-800 border border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-700/60">
+                              <AlertTriangle size={11} className="text-rose-600" />
+                              Anulado
+                            </span>
                           )}
 
-                          {t.folio === 'FOLIO-8F1085AD' && (
+                          <div className="flex items-center justify-end gap-1 flex-wrap">
                             <button
                               type="button"
-                              onClick={() => handleAcelerarFiniquito(t.folio)}
-                              disabled={descargandoFolio === t.folio}
-                              title="Acelerar y Emitir Finiquito Art. 177"
-                              className="px-2.5 py-1 text-xs font-bold rounded-lg bg-amber-500 hover:bg-amber-600 text-white shadow-2xs transition-all cursor-pointer flex items-center gap-1"
+                              onClick={() => {
+                                setTransaccionEditando(t);
+                                setNotaCorreccionDash('');
+                                setMotivoCorreccionDash('Ajuste de mediciones por optómetra (Garantía clínica)');
+                              }}
+                              title="Corregir mediciones o datos de esta venta"
+                              className="px-2 py-1 text-xs font-semibold rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 shadow-2xs transition-all cursor-pointer flex items-center gap-1"
                             >
-                              <Scale size={11} />
-                              <span>Finiquito</span>
+                              <Edit3 size={11} className="text-amber-600 dark:text-amber-400" />
+                              <span>Corregir</span>
                             </button>
-                          )}
+
+                            {t.estado !== 'Anulado' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setTransaccionAnulando(t);
+                                  setMotivoAnulacionDash('Desistimiento del cliente');
+                                }}
+                                title="Anular venta y devolver stock"
+                                className="px-2 py-1 text-xs font-semibold rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-800 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 dark:text-rose-300 border border-rose-300 dark:border-rose-700/60 shadow-2xs transition-all cursor-pointer flex items-center gap-1"
+                              >
+                                <AlertTriangle size={11} className="text-rose-600 dark:text-rose-400" />
+                                <span>Anular</span>
+                              </button>
+                            )}
+
+                            {estaSellado && (
+                              <button
+                                type="button"
+                                onClick={() => handleDescargarComprobante(t.folio)}
+                                disabled={descargandoFolio === t.folio}
+                                title="Descargar Comprobante PDF de Entrega"
+                                className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-white hover:bg-slate-50 dark:bg-zinc-800 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-200 shadow-2xs transition-all cursor-pointer flex items-center gap-1"
+                              >
+                                <Download size={11} className="text-amaru-copper" />
+                                <span>PDF</span>
+                              </button>
+                            )}
+
+                            {t.folio === 'FOLIO-8F1085AD' && (
+                              <button
+                                type="button"
+                                onClick={() => handleAcelerarFiniquito(t.folio)}
+                                disabled={descargandoFolio === t.folio}
+                                title="Acelerar y Emitir Finiquito Art. 177"
+                                className="px-2.5 py-1 text-xs font-bold rounded-lg bg-amber-500 hover:bg-amber-600 text-white shadow-2xs transition-all cursor-pointer flex items-center gap-1"
+                              >
+                                <Scale size={11} />
+                                <span>Finiquito</span>
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </td>
                     </tr>
@@ -1424,6 +1878,302 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
                 className="px-4 py-1.5 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-xl uppercase tracking-wider cursor-pointer shadow-xs"
               >
                 Confirmar Observación
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal de Visor Rápido de Receta para Administradora ── */}
+      {modalVerReceta && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#1C1A18] border border-slate-200 dark:border-white/10 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-white/5">
+              <div className="flex items-center gap-2 text-amaru-copper">
+                <Eye size={18} />
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                  Visor Rápido de Receta Oftalmológica
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalVerReceta(null)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-1 rounded-lg cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="flex items-center justify-between bg-slate-50 dark:bg-zinc-900/60 p-3 rounded-xl border border-slate-200/60 dark:border-zinc-800">
+                <div>
+                  <div className="font-bold text-slate-900 dark:text-white text-sm">{modalVerReceta.nombre}</div>
+                  <div className="font-mono text-slate-500 dark:text-zinc-400 text-[11px]">{modalVerReceta.rut} · {modalVerReceta.folio}</div>
+                </div>
+                <div className="text-right">
+                  <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amaru-copper/10 text-amaru-copper border border-amaru-copper/20">
+                    📍 {modalVerReceta.ciudad}
+                  </span>
+                  <div className="text-[10px] text-slate-400 mt-0.5">{modalVerReceta.empresa || 'Particular'}</div>
+                </div>
+              </div>
+
+              {/* Tabla de Graduación OD / OI */}
+              <div className="p-3.5 bg-slate-50 dark:bg-zinc-900/40 rounded-xl border border-slate-200/80 dark:border-zinc-800">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                  Graduación Refractiva Indicada
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-[#151413] border border-slate-200/60 dark:border-zinc-800">
+                    <span className="font-bold text-amaru-copper block text-[11px] mb-1">👁️ Ojo Derecho (OD)</span>
+                    <div className="space-y-0.5 font-mono text-[11px] text-slate-700 dark:text-zinc-300">
+                      <div>Esfera: <strong className="text-slate-900 dark:text-white">{modalVerReceta.odEsfera || '0.00'}</strong></div>
+                      <div>Cilindro: <strong className="text-slate-900 dark:text-white">{modalVerReceta.odCilindro || '0.00'}</strong></div>
+                      <div>Eje: <strong className="text-slate-900 dark:text-white">{modalVerReceta.odEje || '0°'}</strong></div>
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-[#151413] border border-slate-200/60 dark:border-zinc-800">
+                    <span className="font-bold text-amaru-copper block text-[11px] mb-1">👁️ Ojo Izquierdo (OI)</span>
+                    <div className="space-y-0.5 font-mono text-[11px] text-slate-700 dark:text-zinc-300">
+                      <div>Esfera: <strong className="text-slate-900 dark:text-white">{modalVerReceta.oiEsfera || '0.00'}</strong></div>
+                      <div>Cilindro: <strong className="text-slate-900 dark:text-white">{modalVerReceta.oiCilindro || '0.00'}</strong></div>
+                      <div>Eje: <strong className="text-slate-900 dark:text-white">{modalVerReceta.oiEje || '0°'}</strong></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Archivo adjunto / Documento */}
+              <div className="p-3 bg-amber-500/5 dark:bg-amber-500/10 rounded-xl border border-amber-500/20 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <FileCheck2 size={16} className="text-amaru-copper" />
+                  <div>
+                    <div className="font-semibold text-slate-900 dark:text-white text-[11px]">
+                      {modalVerReceta.archivoNombre || 'Receta_Médica_Visada.pdf'}
+                    </div>
+                    <div className="text-[10px] text-slate-400">
+                      Documento visable conforme a Res. Exenta 1.200 / MINSAL
+                    </div>
+                  </div>
+                </div>
+                <span className="text-[10px] font-mono font-bold text-amaru-copper bg-white dark:bg-black/30 px-2 py-1 rounded-md border border-amaru-copper/30">
+                  PDF / IMG OK
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-white/5">
+              <button
+                type="button"
+                onClick={() => {
+                  const sol = modalVerReceta;
+                  setModalVerReceta(null);
+                  setModalObservar({ id: sol.id, nombre: sol.nombre, rut: sol.rut });
+                }}
+                className="px-3 py-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30 rounded-lg cursor-pointer"
+              >
+                Observar Receta...
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setModalVerReceta(null)}
+                  className="px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg cursor-pointer"
+                >
+                  Cerrar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const sol = modalVerReceta;
+                    setModalVerReceta(null);
+                    handleAprobarSolicitud(sol);
+                  }}
+                  className="px-4 py-1.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl uppercase tracking-wider cursor-pointer shadow-xs"
+                >
+                  Aprobar y Visar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Corrección Administrativa de Transacción */}
+      {transaccionEditando && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-zinc-800">
+              <div className="flex items-center gap-2">
+                <span className="p-2 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 rounded-xl">
+                  <Edit3 size={18} />
+                </span>
+                <div>
+                  <h3 className="font-bold text-slate-800 dark:text-white text-base">
+                    Corregir Venta / Pedido (Control Administradora)
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400">
+                    Folio: {transaccionEditando.folio} · Paciente: {transaccionEditando.trabajadorNombre} ({transaccionEditando.trabajadorRut})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTransaccionEditando(null)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 text-lg cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4 py-4 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-zinc-300 mb-1">
+                  Motivo de Rectificación (Obligatorio)
+                </label>
+                <select
+                  value={motivoCorreccionDash}
+                  onChange={(e) => setMotivoCorreccionDash(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl p-2.5 text-slate-800 dark:text-zinc-200 font-medium"
+                >
+                  <option value="Ajuste de mediciones por optómetra (Garantía clínica)">
+                    Ajuste de mediciones por optómetra (Garantía clínica)
+                  </option>
+                  <option value="Error de digitación en tienda">
+                    Error de digitación en tienda
+                  </option>
+                  <option value="Cambio de armazón solicitado por cliente">
+                    Cambio de armazón solicitado por cliente
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-zinc-300 mb-1">
+                  Nota / Detalle de la Corrección
+                </label>
+                <textarea
+                  rows={3}
+                  value={notaCorreccionDash}
+                  onChange={(e) => setNotaCorreccionDash(e.target.value)}
+                  placeholder="Detalla las nuevas graduaciones, cambio de montura o corrección aplicada..."
+                  className="w-full bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl p-2.5 text-slate-800 dark:text-zinc-200 placeholder:text-slate-400"
+                />
+              </div>
+
+              <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-xl text-amber-800 dark:text-amber-300 text-[11px] leading-relaxed">
+                ℹ️ Esta modificación quedará registrada con tu firma ejecutiva (María González), fecha y hora exacta, actualizando el estado de la transacción a <strong>Rectificado</strong>.
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-zinc-800">
+              <button
+                type="button"
+                onClick={() => setTransaccionEditando(null)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-xl cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleGuardarCorreccionDash}
+                className="px-5 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl transition cursor-pointer shadow-xs"
+              >
+                Guardar Rectificación
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Anulación y Reversa de Stock desde Dashboard */}
+      {transaccionAnulando && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-zinc-800">
+              <div className="flex items-center gap-2">
+                <span className="p-2 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-400 rounded-xl">
+                  <AlertTriangle size={18} />
+                </span>
+                <div>
+                  <h3 className="font-bold text-slate-800 dark:text-white text-base">
+                    Anular Venta / Devolver Stock
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400">
+                    Folio: {transaccionAnulando.folio} · Monto: {formatCLP(transaccionAnulando.monto)}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTransaccionAnulando(null)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 text-lg cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4 py-4 text-xs">
+              <div className="p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/40 rounded-xl text-red-800 dark:text-red-300 text-[11px] leading-relaxed">
+                ⚠️ <strong>Acción Irreversible:</strong> Al anular esta transacción:
+                <ul className="list-disc list-inside mt-1 space-y-0.5">
+                  <li>El estado pasará a <strong>Anulado</strong> en el historial.</li>
+                  <li>Se reintegrará automáticamente <strong>+1 unidad al inventario</strong> de la sucursal {transaccionAnulando.sucursal}.</li>
+                  <li>Se generará un movimiento de ajuste en el Kardex y auditoría.</li>
+                </ul>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-zinc-300 mb-1">
+                  Motivo de la Anulación (Obligatorio)
+                </label>
+                <select
+                  value={motivoAnulacionDash}
+                  onChange={(e) => setMotivoAnulacionDash(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl p-2.5 text-slate-800 dark:text-zinc-200 font-medium"
+                >
+                  <option value="Desistimiento del cliente">
+                    Desistimiento del cliente
+                  </option>
+                  <option value="Error de cobro/duplicidad">
+                    Error de cobro / duplicidad
+                  </option>
+                  <option value="Rechazo de cobertura convenio">
+                    Rechazo de cobertura convenio empresa
+                  </option>
+                </select>
+              </div>
+
+              <div className="bg-slate-50 dark:bg-zinc-800/60 p-3 rounded-xl border border-slate-200 dark:border-zinc-700 space-y-1 text-slate-600 dark:text-zinc-400">
+                <div className="flex justify-between">
+                  <span>Paciente:</span>
+                  <strong className="text-slate-800 dark:text-zinc-200">{transaccionAnulando.trabajadorNombre} ({transaccionAnulando.trabajadorRut})</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span>Sucursal:</span>
+                  <strong className="text-slate-800 dark:text-zinc-200">{transaccionAnulando.sucursal}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span>Modalidad / Tipo:</span>
+                  <strong className="text-slate-800 dark:text-zinc-200">{transaccionAnulando.modalidad}</strong>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-zinc-800">
+              <button
+                type="button"
+                onClick={() => setTransaccionAnulando(null)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-xl cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmarAnulacionDash}
+                className="px-5 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-xl transition cursor-pointer shadow-xs"
+              >
+                Confirmar Anulación y Reintegrar Stock
               </button>
             </div>
           </div>
