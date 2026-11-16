@@ -46,6 +46,7 @@ import {
   cambiarEstadoSolicitud,
   type SolicitudReceta,
 } from '../services/recetasService';
+import { desbloquearCodigoPorAnulacion } from '../services/convenioSindicatoService';
 
 // ── Helpers de Formato ────────────────────────────────────────────────────────
 
@@ -707,6 +708,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
       const updated = [reg, ...current];
       localStorage.setItem('amaru_anulaciones_rectificaciones', JSON.stringify(updated));
       window.dispatchEvent(new Event('amaru_anulaciones_updated'));
+
+      // FASE 2: Desbloqueo inmediato del código sindical para el RUT
+      desbloquearCodigoPorAnulacion(
+        transaccionAnulando.folio,
+        transaccionAnulando.trabajadorRut,
+        'María González (Administradora)',
+        motivoAnulacionDash
+      );
     } catch {
       // ignore
     }

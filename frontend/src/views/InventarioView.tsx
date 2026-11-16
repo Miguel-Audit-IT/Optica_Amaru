@@ -21,7 +21,7 @@ import {
   registrarIngresoStock,
   type ItemInventario,
 } from '../services/inventarioService';
-import { getUserInfo, isUserAdmin } from '../utils/auth';
+import { getUserInfo, isUserAdmin, isUserAuditor } from '../utils/auth';
 import {
   TitanioProIcon,
   AcetatoLumiereIcon,
@@ -32,6 +32,7 @@ export const InventarioView: React.FC = () => {
   const navigate = useNavigate();
   const userInfo = getUserInfo();
   const isAdmin = isUserAdmin();
+  const isAuditor = isUserAuditor();
   const nombreOperador = (
     localStorage.getItem('amaru_nombre_vendedor') ||
     (userInfo.username === '17456789-2' ? 'JUANITA ARAYA' : 'CARLOS ROJAS MORALES')
@@ -262,58 +263,64 @@ export const InventarioView: React.FC = () => {
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-[11px] font-bold uppercase tracking-wider mb-2">
               <ShoppingBag size={13} className="text-amaru-copper" />
-              <span>Catálogo & Stock en Tiempo Real</span>
+              <span>{isAuditor ? 'Auditoría de Inventario' : 'Catálogo & Stock en Tiempo Real'}</span>
             </div>
             <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 dark:text-white">
-              Inventario & Vitrina de Armazones
+              {isAuditor ? 'Stock y Kardex' : 'Inventario & Vitrina de Armazones'}
             </h2>
             <p className="text-xs sm:text-sm text-slate-600 dark:text-zinc-400 mt-1 max-w-2xl leading-relaxed">
-              Herramienta ágil de consulta para el vendedor en mesón: revisa disponibilidad de monturas, materiales oftálmicos y stock en vivo entre sucursales.
+              {isAuditor
+                ? 'Auditoría de existencias físicas en bodega, valorización al costo y registro histórico de movimientos.'
+                : 'Herramienta ágil de consulta para el vendedor en mesón: revisa disponibilidad de monturas, materiales oftálmicos y stock en vivo entre sucursales.'}
             </p>
           </div>
 
           {/* Switch de Sucursal Activa + Ingreso Stock + Refresh */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-            <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-white/90 dark:bg-black/40 border border-slate-200/90 dark:border-white/10 shadow-xs">
-              <button
-                type="button"
-                onClick={() => handleCambiarSucursal('Calama')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                  sucursalActual === 'Calama'
-                    ? 'bg-amaru-copper text-white shadow-xs'
-                    : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <MapPin size={12} />
-                <span>Calama ({totalStockCalama})</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleCambiarSucursal('Antofagasta')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                  sucursalActual === 'Antofagasta'
-                    ? 'bg-amaru-copper text-white shadow-xs'
-                    : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <MapPin size={12} />
-                <span>Antofagasta ({totalStockAntofagasta})</span>
-              </button>
-            </div>
+            {!isAuditor && (
+              <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-white/90 dark:bg-black/40 border border-slate-200/90 dark:border-white/10 shadow-xs">
+                <button
+                  type="button"
+                  onClick={() => handleCambiarSucursal('Calama')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    sucursalActual === 'Calama'
+                      ? 'bg-amaru-copper text-white shadow-xs'
+                      : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <MapPin size={12} />
+                  <span>Calama ({totalStockCalama})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleCambiarSucursal('Antofagasta')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    sucursalActual === 'Antofagasta'
+                      ? 'bg-amaru-copper text-white shadow-xs'
+                      : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <MapPin size={12} />
+                  <span>Antofagasta ({totalStockAntofagasta})</span>
+                </button>
+              </div>
+            )}
 
-            {/* Botón Acción Secundaria: Registrar Ingreso de Stock */}
-            <button
-              type="button"
-              onClick={() => {
-                setSucursalIngreso(sucursalActual);
-                setErrorModal('');
-                setModalIngresoAbierto(true);
-              }}
-              className="px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white flex items-center gap-2 transition-all cursor-pointer shadow-md shadow-emerald-600/20 shrink-0"
-              title="Registrar ingreso de mercadería con Guía de Despacho o Factura Proveedor"
-            >
-              <span>📦 Registrar Ingreso de Stock (Guía)</span>
-            </button>
+            {/* Botón Acción Secundaria: Registrar Ingreso de Stock (Oculto para Auditor SoD A.5.3) */}
+            {!isAuditor && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSucursalIngreso(sucursalActual);
+                  setErrorModal('');
+                  setModalIngresoAbierto(true);
+                }}
+                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white flex items-center gap-2 transition-all cursor-pointer shadow-md shadow-emerald-600/20 shrink-0"
+                title="Registrar ingreso de mercadería con Guía de Despacho o Factura Proveedor"
+              >
+                <span>📦 Registrar Ingreso de Stock (Guía)</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -325,6 +332,47 @@ export const InventarioView: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {/* 3 Tarjetas Superiores Simples para Auditor */}
+        {isAuditor && (
+          <div className="mt-5 pt-4 border-t border-slate-200/80 dark:border-white/10 grid grid-cols-1 sm:grid-cols-3 gap-3.5 text-xs animate-in fade-in duration-200">
+            <div className="p-4 rounded-2xl bg-white/80 dark:bg-black/30 border border-slate-200/90 dark:border-white/10 shadow-2xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Stock Total
+              </span>
+              <strong className="text-base sm:text-lg font-black font-mono text-slate-900 dark:text-white">
+                51 Calama / 25 Antofagasta
+              </strong>
+              <span className="text-[11px] text-emerald-600 block mt-0.5 font-semibold">
+                76 armazones en total
+              </span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white/80 dark:bg-black/30 border border-slate-200/90 dark:border-white/10 shadow-2xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Valor Total en Bodega
+              </span>
+              <strong className="text-base sm:text-lg font-black font-mono text-emerald-600 dark:text-emerald-400">
+                $1.734.000 CLP
+              </strong>
+              <span className="text-[11px] text-slate-500 dark:text-zinc-400 block mt-0.5">
+                Costo Proveedor
+              </span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white/80 dark:bg-black/30 border border-slate-200/90 dark:border-white/10 shadow-2xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                Valor Comercial en Vitrina
+              </span>
+              <strong className="text-base sm:text-lg font-black font-mono text-amber-800 dark:text-amber-300">
+                $6.120.000 CLP
+              </strong>
+              <span className="text-[11px] text-slate-500 dark:text-zinc-400 block mt-0.5">
+                Precio de Venta
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Toast Feedback */}
@@ -343,197 +391,304 @@ export const InventarioView: React.FC = () => {
         </div>
       )}
 
-      {/* ── Barra de Búsqueda y Filtros de Categoría ── */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white/80 dark:bg-[#181614]/80 backdrop-blur-md p-3.5 rounded-2xl border border-slate-200/80 dark:border-white/10 shadow-xs">
-        {/* Buscador */}
-        <div className="relative flex-1">
-          <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-            <Search size={16} />
-          </span>
-          <input
-            type="text"
-            placeholder="Buscar por modelo, SKU (ej. EPP-TITAN), material o filtro..."
-            value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 text-xs bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amaru-copper"
-          />
-        </div>
+      {isAuditor ? (
+        /* ── Tabla Contable de Armazones (Exclusivo Auditoría) ── */
+        <div className="card-zenith rounded-3xl p-6 bg-white dark:bg-[#181614] border border-slate-200/90 dark:border-white/10 shadow-sm space-y-4 animate-in fade-in duration-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-white/5">
+            <div>
+              <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                Tabla Contable de Armazones
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
+                Consolidado de modelos, costos de adquisición, precios de venta y existencias por sucursal.
+              </p>
+            </div>
+            {/* Buscador Rápido */}
+            <div className="relative w-full sm:w-64">
+              <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                <Search size={14} />
+              </span>
+              <input
+                type="text"
+                placeholder="Filtrar por SKU o modelo..."
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amaru-copper"
+              />
+            </div>
+          </div>
 
-        {/* Filtros Rápidos por Categoría */}
-        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-          {['Todos', 'Boutique & Urbano', 'Seguridad Óptica (EPP)', 'Ultralivianos & Titanio'].map((cat) => (
-            <button
-              key={cat}
-              type="button"
-              onClick={() => setCategoriaSeleccionada(cat)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                categoriaSeleccionada === cat
-                  ? 'bg-[#201E1C] dark:bg-white text-white dark:text-slate-900 shadow-xs'
-                  : 'bg-slate-100 dark:bg-zinc-800/60 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white border border-slate-200/60 dark:border-zinc-700/50'
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
-        </div>
-      </div>
+          <div className="overflow-x-auto rounded-xl border border-slate-200/80 dark:border-zinc-800">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="bg-slate-50/80 dark:bg-zinc-900/60 text-slate-500 dark:text-zinc-400 uppercase tracking-wider font-semibold border-b border-slate-200/80 dark:border-zinc-800 text-[10px]">
+                  <th className="px-3.5 py-3">Código SKU</th>
+                  <th className="px-3.5 py-3">Modelo de Armazón</th>
+                  <th className="px-3.5 py-3">Categoría</th>
+                  <th className="px-3.5 py-3 text-right">Costo Proveedor</th>
+                  <th className="px-3.5 py-3 text-right">Precio Venta</th>
+                  <th className="px-3.5 py-3 text-center">Margen %</th>
+                  <th className="px-3.5 py-3 text-center">Stock Calama</th>
+                  <th className="px-3.5 py-3 text-center">Stock Antofagasta</th>
+                  <th className="px-3.5 py-3 text-right">Valor Total Costo</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-zinc-800/80 bg-white dark:bg-[#1C1A18]">
+                {armazonesFiltrados.map((item) => {
+                  const costo = COSTOS_ADMIN[item.sku]?.costo ?? Math.round(item.precioClp * 0.28);
+                  const ganancia = item.precioClp - costo;
+                  const margenPct = Math.round((ganancia / item.precioClp) * 100);
+                  const stockCalama = item.stock?.Calama || 0;
+                  const stockAntofagasta = item.stock?.Antofagasta || 0;
+                  const totalUds = stockCalama + stockAntofagasta;
+                  const valorTotalCosto = costo * totalUds;
 
-      {/* ── Grid de Tarjetas de Armazones ── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {armazonesFiltrados.map((item) => {
-          const stockSucursalActiva = item.stock[sucursalActual] || 0;
-          const otraSucursal = sucursalActual === 'Calama' ? 'Antofagasta' : 'Calama';
-          const stockOtraSucursal = item.stock[otraSucursal] || 0;
-
-          return (
-            <div
-              key={item.sku}
-              className="card-zenith rounded-3xl p-5 border border-slate-200/90 dark:border-white/10 hover:border-amaru-copper/50 transition-all duration-200 shadow-xs hover:shadow-md flex flex-col justify-between group relative overflow-hidden"
-            >
-              <div>
-                {/* Header de Tarjeta: Categoría y SKU */}
-                <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-white/5">
-                  <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300 border border-slate-200 dark:border-zinc-700">
-                    {item.sku}
-                  </span>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
-                    {item.categoria}
-                  </span>
-                </div>
-
-                {/* Ilustración Vectorial del Armazón */}
-                <div className="py-5 px-3 flex items-center justify-center bg-slate-50/60 dark:bg-black/20 rounded-2xl my-3 group-hover:scale-105 transition-transform duration-200">
-                  {renderIconoArmazon(item.nombre, 44)}
-                </div>
-
-                {/* Nombre y Precio */}
-                <div className="space-y-1">
-                  <h3 className="text-base font-black text-slate-900 dark:text-white group-hover:text-amaru-copper transition-colors">
-                    {item.nombre}
-                  </h3>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-lg font-black text-slate-900 dark:text-white">
-                      ${item.precioClp.toLocaleString('es-CL')}
-                    </span>
-                    <span className="text-[11px] font-bold text-slate-400 uppercase">
-                      CLP
-                    </span>
-                  </div>
-                  {/* Banda Exclusiva de Gerencia: Costo y Margen (solo ADMINISTRADOR) */}
-                  {isAdmin && (
-                    (() => {
-                      const costo = COSTOS_ADMIN[item.sku]?.costo ?? Math.round(item.precioClp * 0.28);
-                      const ganancia = item.precioClp - costo;
-                      const margenPct = Math.round((ganancia / item.precioClp) * 100);
-
-                      return (
-                        <div className="mt-1 px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/25 dark:bg-amber-900/20">
-                          <div className="flex items-center justify-between text-[10px] font-bold">
-                            <span className="text-slate-500 dark:text-zinc-400">Costo Proveedor:</span>
-                            <span className="font-mono text-slate-700 dark:text-zinc-300">
-                              ${costo.toLocaleString('es-CL')} CLP
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between text-[10px] font-bold mt-0.5">
-                            <span className="text-slate-500 dark:text-zinc-400">Utilidad Neta:</span>
-                            <span className="font-mono text-emerald-600 dark:text-emerald-400">
-                              +${ganancia.toLocaleString('es-CL')} CLP ({margenPct}% Margen)
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })()
-                  )}
-                </div>
-
-                {/* Ficha Técnica Rápida */}
-                <div className="mt-3 pt-3 border-t border-slate-100 dark:border-white/5 space-y-2 text-xs">
-                  <div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                      Material & Montura
-                    </span>
-                    <span className="font-medium text-slate-700 dark:text-zinc-300 line-clamp-1">
-                      {item.material}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                      Tratamiento Óptico
-                    </span>
-                    <span className="font-medium text-slate-700 dark:text-zinc-300 line-clamp-1">
-                      {item.filtro}
-                    </span>
-                  </div>
-
-                  {/* Colores en Stock */}
-                  <div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                      Colores de Fábrica
-                    </span>
-                    <div className="flex flex-wrap gap-1">
-                      {item.colores.map((color) => (
-                        <span
-                          key={color}
-                          className="px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300"
-                        >
-                          {color}
+                  return (
+                    <tr key={item.sku} className="hover:bg-slate-50/60 dark:hover:bg-zinc-900/40 transition-colors">
+                      <td className="px-3.5 py-3 font-mono text-[11px] font-bold text-slate-700 dark:text-zinc-300">
+                        {item.sku}
+                      </td>
+                      <td className="px-3.5 py-3">
+                        <span className="font-bold text-slate-900 dark:text-white block">
+                          {item.nombre}
                         </span>
-                      ))}
+                        <span className="text-[10px] text-slate-400 line-clamp-1">
+                          {item.material}
+                        </span>
+                      </td>
+                      <td className="px-3.5 py-3 text-[11px] text-slate-600 dark:text-zinc-400">
+                        {item.categoria}
+                      </td>
+                      <td className="px-3.5 py-3 font-mono text-right font-medium text-slate-700 dark:text-zinc-300">
+                        ${costo.toLocaleString('es-CL')}
+                      </td>
+                      <td className="px-3.5 py-3 font-mono text-right font-bold text-slate-900 dark:text-white">
+                        ${item.precioClp.toLocaleString('es-CL')}
+                      </td>
+                      <td className="px-3.5 py-3 text-center">
+                        <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-bold font-mono bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+                          +{margenPct}%
+                        </span>
+                      </td>
+                      <td className="px-3.5 py-3 text-center font-mono font-bold text-amber-800 dark:text-amber-300">
+                        {stockCalama} uds
+                      </td>
+                      <td className="px-3.5 py-3 text-center font-mono font-bold text-blue-700 dark:text-blue-300">
+                        {stockAntofagasta} uds
+                      </td>
+                      <td className="px-3.5 py-3 font-mono text-right font-black text-emerald-600 dark:text-emerald-400">
+                        ${valorTotalCosto.toLocaleString('es-CL')}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* ── Barra de Búsqueda y Filtros de Categoría ── */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white/80 dark:bg-[#181614]/80 backdrop-blur-md p-3.5 rounded-2xl border border-slate-200/80 dark:border-white/10 shadow-xs">
+            {/* Buscador */}
+            <div className="relative flex-1">
+              <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                <Search size={16} />
+              </span>
+              <input
+                type="text"
+                placeholder="Buscar por modelo, SKU (ej. EPP-TITAN), material o filtro..."
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 text-xs bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amaru-copper"
+              />
+            </div>
+
+            {/* Filtros Rápidos por Categoría */}
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+              {['Todos', 'Boutique & Urbano', 'Seguridad Óptica (EPP)', 'Ultralivianos & Titanio'].map((cat) => (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setCategoriaSeleccionada(cat)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                    categoriaSeleccionada === cat
+                      ? 'bg-[#201E1C] dark:bg-white text-white dark:text-slate-900 shadow-xs'
+                      : 'bg-slate-100 dark:bg-zinc-800/60 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white border border-slate-200/60 dark:border-zinc-700/50'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Grid de Tarjetas de Armazones ── */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {armazonesFiltrados.map((item) => {
+              const stockSucursalActiva = item.stock[sucursalActual] || 0;
+              const otraSucursal = sucursalActual === 'Calama' ? 'Antofagasta' : 'Calama';
+              const stockOtraSucursal = item.stock[otraSucursal] || 0;
+
+              return (
+                <div
+                  key={item.sku}
+                  className="card-zenith rounded-3xl p-5 border border-slate-200/90 dark:border-white/10 hover:border-amaru-copper/50 transition-all duration-200 shadow-xs hover:shadow-md flex flex-col justify-between group relative overflow-hidden"
+                >
+                  <div>
+                    {/* Header de Tarjeta: Categoría y SKU */}
+                    <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-100 dark:border-white/5">
+                      <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300 border border-slate-200 dark:border-zinc-700">
+                        {item.sku}
+                      </span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                        {item.categoria}
+                      </span>
+                    </div>
+
+                    {/* Ilustración Vectorial del Armazón */}
+                    <div className="py-5 px-3 flex items-center justify-center bg-slate-50/60 dark:bg-black/20 rounded-2xl my-3 group-hover:scale-105 transition-transform duration-200">
+                      {renderIconoArmazon(item.nombre, 44)}
+                    </div>
+
+                    {/* Nombre y Precio */}
+                    <div className="space-y-1">
+                      <h3 className="text-base font-black text-slate-900 dark:text-white group-hover:text-amaru-copper transition-colors">
+                        {item.nombre}
+                      </h3>
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-lg font-black text-slate-900 dark:text-white">
+                          ${item.precioClp.toLocaleString('es-CL')}
+                        </span>
+                        <span className="text-[11px] font-bold text-slate-400 uppercase">
+                          CLP
+                        </span>
+                      </div>
+                      {/* Banda Exclusiva de Gerencia: Costo, Margen y Capital Inmovilizado */}
+                      {isAdmin && (
+                        (() => {
+                          const costo = COSTOS_ADMIN[item.sku]?.costo ?? Math.round(item.precioClp * 0.28);
+                          const ganancia = item.precioClp - costo;
+                          const margenPct = Math.round((ganancia / item.precioClp) * 100);
+                          const stockTotal = (item.stock?.Calama || 0) + (item.stock?.Antofagasta || 0);
+                          const capitalInmovilizado = costo * stockTotal;
+
+                          return (
+                            <div className="mt-1 px-2.5 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/25 dark:bg-amber-900/20 space-y-1">
+                              <div className="flex items-center justify-between text-[10px] font-bold">
+                                <span className="text-slate-500 dark:text-zinc-400">Costo Proveedor:</span>
+                                <span className="font-mono text-slate-700 dark:text-zinc-300">
+                                  ${costo.toLocaleString('es-CL')} CLP
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between text-[10px] font-bold">
+                                <span className="text-slate-500 dark:text-zinc-400">Margen Bruto:</span>
+                                <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                                  +{margenPct}% (${ganancia.toLocaleString('es-CL')})
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between text-[10px] font-bold pt-1 border-t border-amber-500/20">
+                                <span className="text-amber-800 dark:text-amber-300">Capital Inmovilizado:</span>
+                                <span className="font-mono font-black text-amber-900 dark:text-amber-200">
+                                  ${capitalInmovilizado.toLocaleString('es-CL')} ({stockTotal} uds)
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })()
+                      )}
+                    </div>
+
+                    {/* Ficha Técnica Rápida */}
+                    <div className="mt-3 pt-3 border-t border-slate-100 dark:border-white/5 space-y-2 text-xs">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                          Material & Montura
+                        </span>
+                        <span className="font-medium text-slate-700 dark:text-zinc-300 line-clamp-1">
+                          {item.material}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                          Tratamiento Óptico
+                        </span>
+                        <span className="font-medium text-slate-700 dark:text-zinc-300 line-clamp-1">
+                          {item.filtro}
+                        </span>
+                      </div>
+
+                      {/* Colores en Stock */}
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
+                          Colores de Fábrica
+                        </span>
+                        <div className="flex flex-wrap gap-1">
+                          {item.colores.map((color) => (
+                            <span
+                              key={color}
+                              className="px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300"
+                            >
+                              {color}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </div>
 
-              {/* Pie de Tarjeta: Semáforos de Stock + Botón Iniciar Venta */}
-              <div className="mt-4 pt-4 border-t border-slate-100 dark:border-white/5 space-y-3">
-                {/* Semáforos de ambas sucursales */}
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase">
-                      Sucursal Activa ({sucursalActual}):
-                    </span>
-                    {renderSemaforoStock(stockSucursalActiva, sucursalActual, true)}
+                  {/* Pie de Tarjeta: Semáforos de Stock + Botón Iniciar Venta */}
+                  <div className="mt-4 pt-4 border-t border-slate-100 dark:border-white/5 space-y-3">
+                    {/* Semáforos de ambas sucursales */}
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">
+                          Sucursal Activa ({sucursalActual}):
+                        </span>
+                        {renderSemaforoStock(stockSucursalActiva, sucursalActual, true)}
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-medium text-slate-400 uppercase">
+                          En {otraSucursal}:
+                        </span>
+                        {renderSemaforoStock(stockOtraSucursal, otraSucursal, false)}
+                      </div>
+                    </div>
+
+                    {/* Botón de Acción Vendedor */}
+                    <button
+                      type="button"
+                      onClick={() => handleIniciarVenta(item)}
+                      className="w-full btn-copper py-2.5 px-4 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer shadow-xs hover:scale-[1.02] active:scale-95 transition-all"
+                    >
+                      <ShoppingBag size={14} />
+                      <span>Iniciar Venta con este Armazón</span>
+                      <ArrowRight size={13} />
+                    </button>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-medium text-slate-400 uppercase">
-                      En {otraSucursal}:
-                    </span>
-                    {renderSemaforoStock(stockOtraSucursal, otraSucursal, false)}
-                  </div>
                 </div>
-
-                {/* Botón de Acción Vendedor */}
-                <button
-                  type="button"
-                  onClick={() => handleIniciarVenta(item)}
-                  className="w-full btn-copper py-2.5 px-4 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer shadow-xs hover:scale-[1.02] active:scale-95 transition-all"
-                >
-                  <ShoppingBag size={14} />
-                  <span>Iniciar Venta con este Armazón</span>
-                  <ArrowRight size={13} />
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {armazonesFiltrados.length === 0 && (
-        <div className="card-zenith rounded-3xl p-10 text-center max-w-md mx-auto">
-          <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center mb-3">
-            <Search size={24} />
+              );
+            })}
           </div>
-          <h3 className="text-base font-bold text-slate-900 dark:text-white mb-1">
-            No se encontraron armazones
-          </h3>
-          <p className="text-xs text-slate-500 dark:text-zinc-400">
-            Intenta con otro término de búsqueda o selecciona otra categoría.
-          </p>
-        </div>
+
+          {armazonesFiltrados.length === 0 && (
+            <div className="card-zenith rounded-3xl p-10 text-center max-w-md mx-auto">
+              <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center mb-3">
+                <Search size={24} />
+              </div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white mb-1">
+                No se encontraron armazones
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-zinc-400">
+                Intenta con otro término de búsqueda o selecciona otra categoría.
+              </p>
+            </div>
+          )}
+        </>
       )}
 
-      {/* ── Tabla de Kardex: Bitácora de Movimientos (Solo ADMINISTRADOR) ── */}
-      {isAdmin && (
+      {/* ── Tabla de Kardex: Bitácora de Movimientos (ADMINISTRADOR y AUDITOR) ── */}
+      {(isAdmin || isAuditor) && (
         <div className="card-zenith rounded-2xl p-6 border border-amber-500/20 bg-gradient-to-br from-amber-500/[0.03] to-transparent animate-in fade-in duration-200">
           <div className="flex items-center gap-2.5 pb-4 border-b border-slate-100 dark:border-white/5 mb-4">
             <span className="p-2 rounded-xl bg-amber-500/10 text-amber-700 dark:text-amber-400">
@@ -541,10 +696,14 @@ export const InventarioView: React.FC = () => {
             </span>
             <div>
               <h3 className="text-base font-black tracking-tight text-slate-900 dark:text-white">
-                Registro de Entradas y Salidas de Lentes (Quién modificó el stock)
+                {isAuditor
+                  ? 'Últimos Ingresos de Mercadería, Mermas y Cambios de Precio'
+                  : 'Registro de Entradas y Salidas de Lentes (Quién modificó el stock)'}
               </h3>
               <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
-                Control interno de quién actualizó el inventario, cuándo y en qué sucursal — exclusivo Gerencia General.
+                {isAuditor
+                  ? 'Control cronológico de recepciones con guía, mermas de laboratorio y ajustes de inventario.'
+                  : 'Control interno de quién actualizó el inventario, cuándo y en qué sucursal — exclusivo Gerencia General.'}
               </p>
             </div>
           </div>
@@ -553,10 +712,19 @@ export const InventarioView: React.FC = () => {
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50/80 dark:bg-zinc-900/60 text-slate-500 dark:text-zinc-400 uppercase tracking-wider font-semibold border-b border-slate-200/80 dark:border-zinc-800 text-[11px]">
                 <tr>
-                  <th className="px-4 py-3">Fecha y Hora Exacta</th>
-                  <th className="px-4 py-3">Responsable (Quién lo hizo)</th>
-                  <th className="px-4 py-3">Tipo & N° Documento</th>
-                  <th className="px-4 py-3">Sucursal</th>
+                  <th className="px-4 py-3">{isAuditor ? 'Fecha' : 'Fecha y Hora Exacta'}</th>
+                  <th className="px-4 py-3">{isAuditor ? 'Responsable' : 'Responsable (Quién lo hizo)'}</th>
+                  {isAuditor ? (
+                    <>
+                      <th className="px-4 py-3">Sucursal</th>
+                      <th className="px-4 py-3">Tipo de Movimiento</th>
+                    </>
+                  ) : (
+                    <>
+                      <th className="px-4 py-3">Tipo & N° Documento</th>
+                      <th className="px-4 py-3">Sucursal</th>
+                    </>
+                  )}
                   <th className="px-4 py-3">Modelo & Cantidad</th>
                 </tr>
               </thead>
@@ -592,24 +760,49 @@ export const InventarioView: React.FC = () => {
                         <td className="px-4 py-3">
                           <span className="font-bold text-slate-900 dark:text-white">{responsable}</span>
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${
-                            eIngreso
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/40'
-                              : 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/40'
-                          }`}>
-                            <TrendingUp size={10} />
-                            {eIngreso ? 'Ingreso' : 'Descuento'}
-                          </span>
-                          <div className="text-[11px] font-mono text-slate-500 dark:text-zinc-400 mt-0.5">
-                            Guía / Doc: <span className="font-bold text-amaru-copper">{guia}</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 dark:text-amber-300">
-                            📍 {sucursal}
-                          </span>
-                        </td>
+                        {isAuditor ? (
+                          <>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 dark:text-amber-300">
+                                📍 {sucursal}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                                eIngreso
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/40'
+                                  : 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/40'
+                              }`}>
+                                <TrendingUp size={10} />
+                                {eIngreso ? 'Ingreso' : 'Descuento'}
+                              </span>
+                              <div className="text-[11px] font-mono text-slate-500 dark:text-zinc-400 mt-0.5">
+                                Guía / Doc: <span className="font-bold text-amaru-copper">{guia}</span>
+                              </div>
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                                eIngreso
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/40'
+                                  : 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/40'
+                              }`}>
+                                <TrendingUp size={10} />
+                                {eIngreso ? 'Ingreso' : 'Descuento'}
+                              </span>
+                              <div className="text-[11px] font-mono text-slate-500 dark:text-zinc-400 mt-0.5">
+                                Guía / Doc: <span className="font-bold text-amaru-copper">{guia}</span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 dark:text-amber-300">
+                                📍 {sucursal}
+                              </span>
+                            </td>
+                          </>
+                        )}
                         <td className="px-4 py-3">
                           <div className="font-semibold text-slate-900 dark:text-white text-[11px]">{modelo}</div>
                           <div className={`font-mono font-black text-sm ${eIngreso ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>

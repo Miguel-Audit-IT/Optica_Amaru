@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Routes, Route, Navigate, NavLink, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   Sun,
   Moon,
@@ -14,11 +14,14 @@ import {
   CloudAlert,
   CloudCheck,
   ShieldCheck,
+  ShieldAlert,
   RefreshCw,
   ShoppingBag,
   MapPin,
   PanelLeftClose,
   PanelLeftOpen,
+  FileText,
+  Receipt,
 } from 'lucide-react';
 import { Login } from './components/Login';
 import TerminalView from './views/TerminalView';
@@ -27,8 +30,9 @@ import EntregaView from './views/EntregaView';
 import PublicQRView from './views/PublicQRView';
 import SeguimientoCompraView from './views/SeguimientoCompraView';
 import { InventarioView } from './views/InventarioView';
+import AuditoriaView from './views/AuditoriaView';
 import logoImg from './assets/logo.jpg';
-import { isUserAdmin, isUserPatient, getUserInfo } from './utils/auth';
+import { isUserAdmin, isUserPatient, isUserAuditor, getUserInfo } from './utils/auth';
 import { useTheme } from './hooks/useTheme';
 import { db } from './db/dexie';
 import { sincronizarColaOffline } from './sw/syncService';
@@ -116,7 +120,11 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
 
   const isAdmin = isUserAdmin();
   const isPatient = isUserPatient();
+  const isAuditor = isUserAuditor();
   const userInfo = getUserInfo();
+  const location = useLocation();
+  const searchTab = new URLSearchParams(location.search).get('tab') || 'control';
+  const isAuditoriaPath = location.pathname.startsWith('/auditoria');
 
   useEffect(() => {
     const handleSucursalUpdated = () => {
@@ -199,9 +207,8 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
         : 'text-slate-600 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.04]'
     }`;
 
-  // Determinación de badge de Rol activo con iconografía distintiva y alta jerarquía sólida
-  const rolActivo = (userInfo.rol || (isAdmin ? 'ADMINISTRADOR' : isPatient ? 'PACIENTE' : 'OPERADOR')).toUpperCase();
-  const esVendedor = rolActivo.includes('OPER');
+  // Determinación de vendedor y nombres operativos
+  const esVendedor = !isAuditor && !isAdmin && !isPatient;
   const nombreVendedorCompleto = (
     localStorage.getItem('amaru_nombre_vendedor') ||
     (userInfo.username === '17456789-2' ? 'JUANITA ARAYA' : 'CARLOS ROJAS MORALES')
@@ -248,6 +255,68 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
                 <Compass size={18} className="shrink-0" />
                 {!sidebarColapsado && <span>Mis Pedidos</span>}
               </NavLink>
+            ) : isAuditor ? (
+              /* ── Sidebar Auditor: 4 Módulos Ejecutivos de Control (Ley 20.584) ── */
+              <div className="space-y-4">
+                <div>
+                  {!sidebarColapsado ? (
+                    <div className="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
+                      Auditoría y Control
+                    </div>
+                  ) : (
+                    <div className="h-px bg-slate-200/70 dark:bg-white/10 my-2 mx-1" />
+                  )}
+                  <div className="space-y-1">
+                    <NavLink
+                      to="/auditoria?tab=control"
+                      className={`w-full ${sidebarColapsado ? 'px-2 py-3 justify-center' : 'px-4 py-3'} rounded-xl font-bold text-sm flex items-center ${sidebarColapsado ? 'justify-center' : 'gap-3'} transition-all duration-150 cursor-pointer ${
+                        isAuditoriaPath && (searchTab === 'control' || !searchTab)
+                          ? 'bg-amaru-copper text-white shadow-md shadow-orange-500/20 border-l-4 border-white'
+                          : 'text-slate-600 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.04]'
+                      }`}
+                      title="Resumen General"
+                    >
+                      <ShieldAlert size={18} className="shrink-0" />
+                      {!sidebarColapsado && <span className="truncate">Resumen General</span>}
+                    </NavLink>
+
+                    <NavLink
+                      to="/auditoria?tab=bitacora"
+                      className={`w-full ${sidebarColapsado ? 'px-2 py-3 justify-center' : 'px-4 py-3'} rounded-xl font-bold text-sm flex items-center ${sidebarColapsado ? 'justify-center' : 'gap-3'} transition-all duration-150 cursor-pointer ${
+                        isAuditoriaPath && searchTab === 'bitacora'
+                          ? 'bg-amaru-copper text-white shadow-md shadow-orange-500/20 border-l-4 border-white'
+                          : 'text-slate-600 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.04]'
+                      }`}
+                      title="Historial de Cambios"
+                    >
+                      <FileText size={18} className="shrink-0" />
+                      {!sidebarColapsado && <span className="truncate">Historial de Cambios</span>}
+                    </NavLink>
+
+                    <NavLink
+                      to="/auditoria?tab=caja"
+                      className={`w-full ${sidebarColapsado ? 'px-2 py-3 justify-center' : 'px-4 py-3'} rounded-xl font-bold text-sm flex items-center ${sidebarColapsado ? 'justify-center' : 'gap-3'} transition-all duration-150 cursor-pointer ${
+                        isAuditoriaPath && searchTab === 'caja'
+                          ? 'bg-amaru-copper text-white shadow-md shadow-orange-500/20 border-l-4 border-white'
+                          : 'text-slate-600 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.04]'
+                      }`}
+                      title="Caja y Convenios"
+                    >
+                      <Receipt size={18} className="shrink-0" />
+                      {!sidebarColapsado && <span className="truncate">Caja y Convenios</span>}
+                    </NavLink>
+
+                    <NavLink
+                      to="/inventario"
+                      className={sidebarNavLinkClass}
+                      title="Stock y Kardex"
+                    >
+                      <ShoppingBag size={18} className="shrink-0" />
+                      {!sidebarColapsado && <span className="truncate">Stock y Kardex</span>}
+                    </NavLink>
+                  </div>
+                </div>
+              </div>
             ) : isAdmin ? (
               /* ── Sidebar Administradora: Lenguaje Directo de Dueña de Negocio ── */
               <div className="space-y-4">
@@ -332,7 +401,7 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
         {/* Pie del Sidebar */}
         <div className="pt-4 mt-4 border-t border-slate-200/70 dark:border-white/10 space-y-2.5">
           {/* Selector de Sucursal Activa */}
-          {!isPatient && (
+          {!isPatient && !isAuditor && (
             <button
               type="button"
               onClick={handleToggleSucursal}
@@ -352,124 +421,126 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
           )}
 
           {/* Widget de Estado de Red / Sincronización */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setPopoverSincronizacionOpen(!popoverSincronizacionOpen)}
-              className={`w-full flex items-center ${sidebarColapsado ? 'justify-center p-2.5' : 'justify-between px-3.5 py-2.5'} rounded-xl text-xs font-semibold border transition-all cursor-pointer shadow-2xs ${
-                !isOnline
-                  ? 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-400 hover:bg-rose-500/20'
-                  : pendientesOffline > 0
-                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-300 hover:bg-amber-500/20'
-                  : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/20'
-              }`}
-              title={!isOnline ? 'Sin Conexión' : pendientesOffline > 0 ? `${pendientesOffline} en cola offline` : 'En Línea'}
-            >
-              {!isOnline ? (
-                <>
-                  <div className="flex items-center gap-2">
-                    <span className="relative flex h-2 w-2">
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500" />
+          {!isAuditor && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setPopoverSincronizacionOpen(!popoverSincronizacionOpen)}
+                className={`w-full flex items-center ${sidebarColapsado ? 'justify-center p-2.5' : 'justify-between px-3.5 py-2.5'} rounded-xl text-xs font-semibold border transition-all cursor-pointer shadow-2xs ${
+                  !isOnline
+                    ? 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-400 hover:bg-rose-500/20'
+                    : pendientesOffline > 0
+                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-300 hover:bg-amber-500/20'
+                    : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/20'
+                }`}
+                title={!isOnline ? 'Sin Conexión' : pendientesOffline > 0 ? `${pendientesOffline} en cola offline` : 'En Línea'}
+              >
+                {!isOnline ? (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <span className="relative flex h-2 w-2">
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500" />
+                      </span>
+                      {!sidebarColapsado && <span className="font-mono text-[11px] font-bold">Sin Conexión</span>}
+                    </div>
+                    {pendientesOffline > 0 && !sidebarColapsado && (
+                      <span className="font-mono text-[10px] bg-rose-500/20 px-1.5 py-0.5 rounded">
+                        {pendientesOffline}
+                      </span>
+                    )}
+                  </>
+                ) : pendientesOffline > 0 ? (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <CloudAlert
+                        size={15}
+                        className={sincronizandoOffline ? 'animate-spin text-amber-500' : 'text-amber-500 animate-pulse'}
+                      />
+                      {!sidebarColapsado && <span className="font-mono text-[11px] font-bold">En Línea</span>}
+                    </div>
+                    {!sidebarColapsado && (
+                      <span className="font-mono text-[10px] bg-amber-500/20 px-1.5 py-0.5 rounded">
+                        {pendientesOffline} cola
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <CloudCheck size={15} className="text-emerald-600 dark:text-emerald-400" />
+                      {!sidebarColapsado && <span className="font-medium text-[11px]">En Línea</span>}
+                    </div>
+                    {!sidebarColapsado && (
+                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
+                        Al día
+                      </span>
+                    )}
+                  </>
+                )}
+              </button>
+
+              {/* Popover / Dropdown de Diagnóstico de Red y Dexie */}
+              {popoverSincronizacionOpen && (
+                <div className="absolute left-0 bottom-full mb-2 w-full sm:w-72 p-4 rounded-2xl bg-white/95 dark:bg-[#1C1A18]/95 backdrop-blur-md border border-slate-200 dark:border-white/10 shadow-xl z-50 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-white/5">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                      Monitor de Conexión
                     </span>
-                    {!sidebarColapsado && <span className="font-mono text-[11px] font-bold">Sin Conexión</span>}
+                    <button
+                      type="button"
+                      onClick={() => setPopoverSincronizacionOpen(false)}
+                      className="text-slate-400 hover:text-slate-600 dark:hover:text-white text-xs p-0.5 cursor-pointer"
+                    >
+                      ✕
+                    </button>
                   </div>
-                  {pendientesOffline > 0 && !sidebarColapsado && (
-                    <span className="font-mono text-[10px] bg-rose-500/20 px-1.5 py-0.5 rounded">
-                      {pendientesOffline}
-                    </span>
-                  )}
-                </>
-              ) : pendientesOffline > 0 ? (
-                <>
-                  <div className="flex items-center gap-2">
-                    <CloudAlert
-                      size={15}
-                      className={sincronizandoOffline ? 'animate-spin text-amber-500' : 'text-amber-500 animate-pulse'}
-                    />
-                    {!sidebarColapsado && <span className="font-mono text-[11px] font-bold">En Línea</span>}
+
+                  <div className="py-3 space-y-2.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-600 dark:text-zinc-400">Estado de Red</span>
+                      <span className="inline-flex items-center gap-1.5 font-bold font-mono">
+                        <span className={`h-2 w-2 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                        {isOnline ? 'Internet Conectado' : 'Sin Conexión'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-600 dark:text-zinc-400">Motor de Resguardo</span>
+                      <span className="font-semibold text-amaru-copper dark:text-orange-400">
+                        Dexie IndexedDB (Local)
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-600 dark:text-zinc-400">Registros en Cola</span>
+                      <span className="font-mono font-bold text-slate-900 dark:text-white">
+                        {pendientesOffline} registro{pendientesOffline === 1 ? '' : 's'}
+                      </span>
+                    </div>
+
+                    {isPatient ? (
+                      <div className="mt-2 p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+                        <ShieldCheck size={16} className="shrink-0 text-emerald-600" />
+                        <span>Conexión Segura Activa. Tus recetas y datos viajan encriptados bajo Ley 21.719.</span>
+                      </div>
+                    ) : (
+                      <div className="pt-2">
+                        <button
+                          type="button"
+                          onClick={handleSincronizarNube}
+                          disabled={!isOnline || sincronizandoOffline || pendientesOffline === 0}
+                          className="w-full py-2 px-3 rounded-xl bg-amaru-copper hover:bg-orange-600 disabled:opacity-50 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs"
+                        >
+                          <RefreshCw size={13} className={sincronizandoOffline ? 'animate-spin' : ''} />
+                          <span>{sincronizandoOffline ? 'Sincronizando...' : 'Sincronizar Ahora'}</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
-                  {!sidebarColapsado && (
-                    <span className="font-mono text-[10px] bg-amber-500/20 px-1.5 py-0.5 rounded">
-                      {pendientesOffline} cola
-                    </span>
-                  )}
-                </>
-              ) : (
-                <>
-                  <div className="flex items-center gap-2">
-                    <CloudCheck size={15} className="text-emerald-600 dark:text-emerald-400" />
-                    {!sidebarColapsado && <span className="font-medium text-[11px]">En Línea</span>}
-                  </div>
-                  {!sidebarColapsado && (
-                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
-                      Al día
-                    </span>
-                  )}
-                </>
+                </div>
               )}
-            </button>
-
-            {/* Popover / Dropdown de Diagnóstico de Red y Dexie */}
-            {popoverSincronizacionOpen && (
-              <div className="absolute left-0 bottom-full mb-2 w-full sm:w-72 p-4 rounded-2xl bg-white/95 dark:bg-[#1C1A18]/95 backdrop-blur-md border border-slate-200 dark:border-white/10 shadow-xl z-50 animate-in fade-in zoom-in-95 duration-150">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-white/5">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
-                    Monitor de Conexión
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setPopoverSincronizacionOpen(false)}
-                    className="text-slate-400 hover:text-slate-600 dark:hover:text-white text-xs p-0.5 cursor-pointer"
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                <div className="py-3 space-y-2.5 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-600 dark:text-zinc-400">Estado de Red</span>
-                    <span className="inline-flex items-center gap-1.5 font-bold font-mono">
-                      <span className={`h-2 w-2 rounded-full ${isOnline ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                      {isOnline ? 'Internet Conectado' : 'Sin Conexión'}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-600 dark:text-zinc-400">Motor de Resguardo</span>
-                    <span className="font-semibold text-amaru-copper dark:text-orange-400">
-                      Dexie IndexedDB (Local)
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-600 dark:text-zinc-400">Registros en Cola</span>
-                    <span className="font-mono font-bold text-slate-900 dark:text-white">
-                      {pendientesOffline} registro{pendientesOffline === 1 ? '' : 's'}
-                    </span>
-                  </div>
-
-                  {isPatient ? (
-                    <div className="mt-2 p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
-                      <ShieldCheck size={16} className="shrink-0 text-emerald-600" />
-                      <span>Conexión Segura Activa. Tus recetas y datos viajan encriptados bajo Ley 21.719.</span>
-                    </div>
-                  ) : (
-                    <div className="pt-2">
-                      <button
-                        type="button"
-                        onClick={handleSincronizarNube}
-                        disabled={!isOnline || sincronizandoOffline || pendientesOffline === 0}
-                        className="w-full py-2 px-3 rounded-xl bg-amaru-copper hover:bg-orange-600 disabled:opacity-50 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs"
-                      >
-                        <RefreshCw size={13} className={sincronizandoOffline ? 'animate-spin' : ''} />
-                        <span>{sincronizandoOffline ? 'Sincronizando...' : 'Sincronizar Ahora'}</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* Botón Cerrar Sesión */}
           <button
@@ -510,6 +581,13 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
                   {(nombrePaciente || 'MIGUEL JORGE').toUpperCase()} · PACIENTE
                 </span>
               </div>
+            ) : isAuditor ? (
+              <div className="px-4 sm:px-5 py-2 rounded-2xl bg-slate-900 dark:bg-black text-white border border-slate-700 shadow-md shadow-slate-900/40 flex items-center gap-2.5">
+                <ShieldCheck size={18} className="text-emerald-400 shrink-0" />
+                <span className="text-base sm:text-lg font-black tracking-tight uppercase">
+                  RODRIGO SANHUEZA (AUDITOR)
+                </span>
+              </div>
             ) : (
               <div className="px-4 sm:px-5 py-2 rounded-2xl bg-slate-700 text-white border border-slate-600 shadow-md shadow-slate-700/30 flex items-center gap-2.5">
                 <FileCheck size={18} className="text-white shrink-0" />
@@ -528,7 +606,11 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
 
           {/* Controles de la Barra Superior */}
           <div className="flex items-center gap-3 self-end sm:self-auto">
-            {!isPatient && (
+            {isAuditor ? (
+              <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 rounded-xl text-xs font-bold bg-slate-900 dark:bg-black text-slate-200 border border-slate-700 shadow-inner">
+                <span className="tracking-wide">🛡️ Vista Global · Solo Consulta</span>
+              </div>
+            ) : !isPatient && (
               <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-500/30">
                 <MapPin size={13} className="text-amaru-copper shrink-0" />
                 <span>📍 Sucursal {sucursalActiva}</span>
@@ -570,12 +652,22 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
         {/* ── Contenido de Vistas ── */}
         <main className="w-full max-w-full px-4 sm:px-6 lg:px-8 py-6 flex-1">
         <Routes>
-          <Route path="/" element={<Navigate to={isPatient ? "/seguimiento" : isAdmin ? "/dashboard" : "/terminal"} replace />} />
+          <Route
+            path="/"
+            element={
+              <Navigate
+                to={isPatient ? "/seguimiento" : isAuditor ? "/auditoria" : isAdmin ? "/dashboard" : "/terminal"}
+                replace
+              />
+            }
+          />
           <Route
             path="/terminal"
             element={
               isPatient ? (
                 <Navigate to="/seguimiento" replace />
+              ) : isAuditor ? (
+                <Navigate to="/auditoria" replace />
               ) : (
                 <TerminalView isOnline={isOnline} onSessionExpired={handleLogout} />
               )
@@ -596,6 +688,8 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
             element={
               isPatient ? (
                 <Navigate to="/seguimiento" replace />
+              ) : isAuditor ? (
+                <Navigate to="/auditoria" replace />
               ) : (
                 <EntregaView isOnline={isOnline} onSessionExpired={handleLogout} />
               )
@@ -603,14 +697,20 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
           />
           <Route
             path="/seguimiento"
-            element={<SeguimientoCompraView />}
+            element={
+              isAuditor ? (
+                <Navigate to="/auditoria" replace />
+              ) : (
+                <SeguimientoCompraView />
+              )
+            }
           />
           <Route
             path="/dashboard"
             element={
               <ProtectedRoute
                 isAllowed={isAdmin}
-                redirectPath="/seguimiento"
+                redirectPath={isAuditor ? "/auditoria" : "/seguimiento"}
                 onUnauthorized={() =>
                   setAlertaRestringida(
                     'Acceso restringido: Se requieren privilegios de Administrador para acceder al Dashboard Gerencial.'
@@ -621,9 +721,33 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/auditoria"
+            element={
+              <ProtectedRoute
+                isAllowed={isAuditor || isAdmin}
+                redirectPath="/seguimiento"
+                onUnauthorized={() =>
+                  setAlertaRestringida(
+                    'Acceso restringido: Se requieren credenciales de Auditoría Forense ISO 27001 para acceder a este módulo.'
+                  )
+                }
+              >
+                <AuditoriaView />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/qr" element={<PublicQRView />} />
-          {/* Catch-all → seguimiento si es paciente, sino terminal */}
-          <Route path="*" element={<Navigate to={isPatient ? "/seguimiento" : isAdmin ? "/dashboard" : "/terminal"} replace />} />
+          {/* Catch-all → seguimiento si es paciente, auditoria si es auditor, dashboard si es admin, sino terminal */}
+          <Route
+            path="*"
+            element={
+              <Navigate
+                to={isPatient ? "/seguimiento" : isAuditor ? "/auditoria" : isAdmin ? "/dashboard" : "/terminal"}
+                replace
+              />
+            }
+          />
         </Routes>
       </main>
       </div>

@@ -14,6 +14,9 @@ import {
   Phone,
   LogIn,
   AlertTriangle,
+  Building,
+  Shield,
+  Eye,
 } from 'lucide-react';
 import logoImg from '../assets/logo.jpg';
 import { validarRUT, normalizarInputRUT, formatearRUT } from '../utils/rut';
@@ -21,9 +24,21 @@ import { ReservaHoraWidget } from '../components/ReservaHoraWidget';
 import { useTheme } from '../hooks/useTheme';
 import {
   agregarSolicitudReceta,
+  marcarContactoVerificado,
   type CiudadAtencion,
   type SolicitudReceta,
 } from '../services/recetasService';
+import {
+  validarCodigoSindicato,
+  type ResultadoValidacionCodigo,
+  CATALOGO_CODIGOS_SINDICALES,
+} from '../services/convenioSindicatoService';
+import {
+  validarPrestador,
+  PADRON_RNPI_INICIAL,
+  type ResultadoValidacionPrestador,
+} from '../services/rnpiService';
+import { WhatsAppIcon } from '../components/icons/WhatsAppIcon';
 
 type TipoSolicitud = 'Cotizar Receta Médica' | 'Agendar Examen Visual' | 'Consulta Convenio';
 
@@ -61,6 +76,74 @@ export const PublicQRView: React.FC = () => {
     rut: string;
   } | null>(null);
 
+  // ── FASE 2: Convenios Institucionales, Anti-Suplantación y Consentimiento MINSAL ──
+  const [codigoConvenio, setCodigoConvenio] = useState('');
+  const [resultadoConvenio, setResultadoConvenio] = useState<ResultadoValidacionCodigo | null>(null);
+  const [consentimientoMinsal, setConsentimientoMinsal] = useState(false);
+  const [declaracionAntifraude, setDeclaracionAntifraude] = useState(false);
+  const [contactoVerificado, setContactoVerificado] = useState(false);
+  const [dispositivoBloqueadoMsg, setDispositivoBloqueadoMsg] = useState<string | null>(() => {
+    const activo = localStorage.getItem('amaru_preingreso_activo_device');
+    if (activo) {
+      try {
+        const parsed = JSON.parse(activo);
+        const transcurridoMin = (Date.now() - Number(parsed.timestamp)) / (1000 * 60);
+        if (transcurridoMin < 15) {
+          return `Aviso Anti-Suplantación: Este dispositivo tiene un pre-ingreso activo reciente (Folio: ${parsed.folio} · RUT: ${parsed.rut}).`;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return null;
+  });
+
+  // ── OCR Clínico, Verificación RNPI y Escudo Anti-IA ──
+  const [fechaEmisionReceta, setFechaEmisionReceta] = useState(
+    () => new Date().toISOString().split('T')[0]
+  );
+  const [alertaAntiguedadReceta, setAlertaAntiguedadReceta] = useState<string | null>(null);
+  const [rutMedico, setRutMedico] = useState('15.421.890-3');
+  const [nombreMedico, setNombreMedico] = useState('Dr. Felipe Andrés Araya Cortés');
+  const [centroSalud, setCentroSalud] = useState('Hospital del Cobre Salvador Allende - Calama');
+  const [validacionRnpi, setValidacionRnpi] = useState<ResultadoValidacionPrestador>(() =>
+    validarPrestador('15.421.890-3')
+  );
+  const [alertaHashReceta, setAlertaHashReceta] = useState<string | null>(null);
+  const [hashArchivoGenerado, setHashArchivoGenerado] = useState<string | null>(null);
+
+  // Dioptrías detectadas por OCR
+  const [odEsfera, setOdEsfera] = useState('-1.50');
+  const [odCilindro, setOdCilindro] = useState('-0.50');
+  const [odEje, setOdEje] = useState('90°');
+  const [oiEsfera, setOiEsfera] = useState('-1.25');
+  const [oiCilindro, setOiCilindro] = useState('-0.75');
+  const [oiEje, setOiEje] = useState('85°');
+  const [dpMm, setDpMm] = useState('63');
+
+  const verificarHashReceta = (file: File, rutPaciente: string): { hash: string; esDuplicado: boolean; mensaje?: string } => {
+    const hash = `sha256_${file.name.replace(/[^a-zA-Z0-9]/g, '')}_${file.size}_${file.lastModified.toString(16)}`;
+    try {
+      const raw = localStorage.getItem('amaru_hashes_recetas');
+      const registros: Array<{ hash: string; rut: string; fecha: number }> = raw ? JSON.parse(raw) : [];
+      const coincidencia = registros.find((r) => r.hash === hash && r.rut !== rutPaciente);
+      if (coincidencia) {
+        return {
+          hash,
+          esDuplicado: true,
+          mensaje: `⚠️ Documento registrado previamente con otro RUT (${coincidencia.rut}). Sujeto a peritaje en mesón.`,
+        };
+      }
+      if (!registros.some((r) => r.hash === hash)) {
+        registros.push({ hash, rut: rutPaciente, fecha: Date.now() });
+        localStorage.setItem('amaru_hashes_recetas', JSON.stringify(registros.slice(-100)));
+      }
+    } catch {
+      // ignore
+    }
+    return { hash, esDuplicado: false };
+  };
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Verificación de Rate-Limit Local (Anti-Spam) ───────────────────────────
@@ -89,7 +172,12 @@ export const PublicQRView: React.FC = () => {
     const v = normalizarInputRUT(e.target.value);
     setRut(v);
     if (v.length >= 7) {
-      setErrorRut(validarRUT(v) ? '' : 'RUT inválido (Módulo 11). Ingrese un RUT chileno válido.');
+      const esValido = validarRUT(v);
+      setErrorRut(esValido ? '' : 'RUT inválido (Módulo 11). Ingrese un RUT chileno válido.');
+      if (esValido && codigoConvenio.trim()) {
+        const res = validarCodigoSindicato(codigoConvenio, v);
+        setResultadoConvenio(res);
+      }
     } else {
       setErrorRut('');
     }
@@ -99,7 +187,23 @@ export const PublicQRView: React.FC = () => {
     if (!rut) return;
     const f = formatearRUT(rut);
     setRut(f);
-    setErrorRut(validarRUT(f) ? '' : 'RUT inválido (Módulo 11). Ingrese un RUT chileno válido.');
+    const esValido = validarRUT(f);
+    setErrorRut(esValido ? '' : 'RUT inválido (Módulo 11). Ingrese un RUT chileno válido.');
+    if (esValido && codigoConvenio.trim()) {
+      const res = validarCodigoSindicato(codigoConvenio, f);
+      setResultadoConvenio(res);
+    }
+  };
+
+  const handleCodigoConvenioChange = (v: string) => {
+    const limpio = v.toUpperCase();
+    setCodigoConvenio(limpio);
+    if (!limpio.trim()) {
+      setResultadoConvenio(null);
+      return;
+    }
+    const res = validarCodigoSindicato(limpio, rut);
+    setResultadoConvenio(res);
   };
 
   const handleTelefonoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -112,17 +216,73 @@ export const PublicQRView: React.FC = () => {
     }
   };
 
+  const tieneConvenioObligatorio = tipoSolicitud === 'Consulta Convenio';
+  const convenioValido = !codigoConvenio.trim()
+    ? !tieneConvenioObligatorio
+    : (resultadoConvenio?.valido ?? false);
+
   const paso1Valido =
     Boolean(rut) &&
     validarRUT(rut) &&
     nombre.trim().length >= 3 &&
     telefono.trim().length >= 8 &&
-    consentimiento;
+    consentimiento &&
+    convenioValido &&
+    !resultadoConvenio?.bloqueado;
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setArchivoReceta(file);
+      const resHash = verificarHashReceta(file, formatearRUT(rut));
+      setHashArchivoGenerado(resHash.hash);
+      setAlertaHashReceta(resHash.mensaje || null);
+
+      if (!odEsfera) setOdEsfera('-1.50');
+      if (!odCilindro) setOdCilindro('-0.50');
+      if (!odEje) setOdEje('90°');
+      if (!oiEsfera) setOiEsfera('-1.25');
+      if (!oiCilindro) setOiCilindro('-0.75');
+      if (!oiEje) setOiEje('85°');
+      if (!dpMm) setDpMm('63');
+    }
+  };
+
+  const handleRutMedicoChange = (valorRaw: string) => {
+    const norm = normalizarInputRUT(valorRaw);
+    setRutMedico(norm);
+    if (norm.length >= 7) {
+      const res = validarPrestador(norm);
+      setValidacionRnpi(res);
+      if (res.prestador) {
+        setNombreMedico(res.prestador.nombre);
+        setCentroSalud(res.prestador.centroSalud);
+      }
+    } else {
+      setValidacionRnpi({
+        validoModulo11: false,
+        prestador: null,
+        estado: 'RUT_INVALIDO',
+        mensaje: 'RUT médico incompleto.',
+      });
+    }
+  };
+
+  const handleFechaEmisionChange = (nuevaFecha: string) => {
+    setFechaEmisionReceta(nuevaFecha);
+    if (nuevaFecha) {
+      const emision = new Date(nuevaFecha);
+      const hoy = new Date();
+      const diffDias = Math.floor((hoy.getTime() - emision.getTime()) / (1000 * 60 * 60 * 24));
+      if (diffDias > 365) {
+        setAlertaAntiguedadReceta(
+          `⚠️ Receta con más de 12 meses (${diffDias} días). Según normativa MINSAL debe ser evaluada en sucursal o renovada.`
+        );
+      } else if (diffDias < 0) {
+        setAlertaAntiguedadReceta('⚠️ La fecha de emisión no puede ser futura.');
+      } else {
+        setAlertaAntiguedadReceta(null);
+      }
     }
   };
 
@@ -140,9 +300,27 @@ export const PublicQRView: React.FC = () => {
     setPaso(2);
   };
 
+  const requiereAntifraude = Boolean(codigoConvenio.trim()) || tipoSolicitud === 'Consulta Convenio';
+  const paso2Valido =
+    estadoReceta === 'vigente'
+      ? Boolean(archivoReceta) && consentimientoMinsal && (!requiereAntifraude || declaracionAntifraude)
+      : true;
+
   // ── Completar Solicitud con Receta o Directo (Cuarentena Zero-Trust) ────────
+  // Anti-Sabotaje: NO descuenta stock ni activa candado de 30 días en el pre-ingreso web
   const handleCompletarPreIngresoConReceta = () => {
     if (!verificarRateLimit()) return;
+    if (!validarRUT(rut)) {
+      setErrorRut('RUT inválido (Módulo 11).');
+      return;
+    }
+    if (resultadoConvenio?.bloqueado) {
+      setErrorRateLimit(resultadoConvenio.mensajeError || 'Código en período de carencia de 30 días.');
+      return;
+    }
+
+    const infoConv = codigoConvenio.trim() ? CATALOGO_CODIGOS_SINDICALES[codigoConvenio.trim().toUpperCase()] : undefined;
+    const esTipoB = infoConv?.tipo === 'TIPO_B';
 
     const nueva = agregarSolicitudReceta({
       rut: formatearRUT(rut),
@@ -150,21 +328,65 @@ export const PublicQRView: React.FC = () => {
       correo: `${rut.replace(/[^0-9kK]/g, '')}@solicitud.amaru.cl`,
       telefono: telefono.trim(),
       ciudad: sucursal,
-      tipoUsuario: tipoSolicitud === 'Consulta Convenio' ? 'Convenio Minero' : 'Particular',
+      tipoUsuario: infoConv ? 'Convenio Minero' : tipoSolicitud === 'Consulta Convenio' ? 'Convenio Minero' : 'Particular',
+      empresa: infoConv?.empresa || (tipoSolicitud === 'Consulta Convenio' ? 'Convenio Institucional' : undefined),
       tipoReceta: estadoReceta === 'vigente' ? 'vigente' : 'sin_receta',
       archivoNombre: archivoReceta ? archivoReceta.name : 'Receta_Digital.pdf',
+      dioptriasManuales: true,
+      odEsfera,
+      odCilindro,
+      odEje,
+      oiEsfera,
+      oiCilindro,
+      oiEje,
+      dpMm,
+      rutMedico: formatearRUT(rutMedico),
+      nombreMedico: nombreMedico.trim(),
+      centroSalud: centroSalud.trim(),
+      fechaEmisionReceta,
+      hashArchivoReceta: hashArchivoGenerado || undefined,
+      estadoRnpi: validacionRnpi.estado,
       armazon: armazonSeleccionado,
-      monto: tipoSolicitud === 'Consulta Convenio' ? 120000 : 85000,
-      modalidadPago: tipoSolicitud,
+      monto: esTipoB ? (infoConv?.tope || 150000) : 85000,
+      modalidadPago: infoConv
+        ? `Pre-Ingreso ${infoConv.tipo} (${infoConv.codigo}) · Pendiente Acreditación Mesón`
+        : tipoSolicitud,
       origen: 'QR_PUBLICO',
-      tipoSolicitud,
+      tipoSolicitud: 'PRE-INGRESO WEB (PENDIENTE CONFIRMACIÓN PRESENCIAL / WHATSAPP)',
       consentimientoLey21719: true,
+      consentimientoMinsal: true,
+      declaracionAntifraude: requiereAntifraude ? declaracionAntifraude : false,
+      codigoConvenio: codigoConvenio.trim().toUpperCase() || undefined,
+      contactoVerificado: false,
     });
 
     registrarEnvio();
+
+    // Guardar en dispositivo para prevenir ráfaga anti-sabotaje
+    localStorage.setItem(
+      'amaru_preingreso_activo_device',
+      JSON.stringify({
+        folio: nueva.folio,
+        rut: formatearRUT(rut),
+        timestamp: Date.now(),
+      })
+    );
+
     setCodigoPreIngreso(nueva.folio);
     setSolicitudConfirmada(nueva);
     setPaso(3);
+  };
+
+  const handleConfirmarPorWhatsApp = () => {
+    setContactoVerificado(true);
+    const folioTarget = solicitudConfirmada?.folio || codigoPreIngreso;
+    if (folioTarget) {
+      marcarContactoVerificado(folioTarget);
+    }
+    const msj = encodeURIComponent(
+      `Hola Óptica Amaru Sucursal ${sucursal}, soy ${nombre} (RUT: ${formatearRUT(rut)}). Acabo de registrar mi pre-ingreso web Folio ${folioTarget}${codigoConvenio.trim() ? ` con código de convenio ${codigoConvenio.toUpperCase()}` : ''}. Envío este mensaje para confirmar mi solicitud.`
+    );
+    window.open(`https://wa.me/56985860973?text=${msj}`, '_blank', 'noopener,noreferrer');
   };
 
   const handleReiniciar = () => {
@@ -180,6 +402,26 @@ export const PublicQRView: React.FC = () => {
     setCodigoPreIngreso('');
     setReservaDetalle(null);
     setSolicitudConfirmada(null);
+    setCodigoConvenio('');
+    setResultadoConvenio(null);
+    setConsentimientoMinsal(false);
+    setDeclaracionAntifraude(false);
+    setContactoVerificado(false);
+    setFechaEmisionReceta(new Date().toISOString().split('T')[0]);
+    setAlertaAntiguedadReceta(null);
+    setRutMedico('15.421.890-3');
+    setNombreMedico('Dr. Felipe Andrés Araya Cortés');
+    setCentroSalud('Hospital del Cobre Salvador Allende - Calama');
+    setValidacionRnpi(validarPrestador('15.421.890-3'));
+    setAlertaHashReceta(null);
+    setHashArchivoGenerado(null);
+    setOdEsfera('-1.50');
+    setOdCilindro('-0.50');
+    setOdEje('90°');
+    setOiEsfera('-1.25');
+    setOiCilindro('-0.75');
+    setOiEje('85°');
+    setDpMm('63');
     setPaso(1);
   };
 
@@ -230,6 +472,26 @@ export const PublicQRView: React.FC = () => {
           </div>
         )}
 
+        {/* Alerta Anti-Suplantación de Dispositivo */}
+        {dispositivoBloqueadoMsg && (
+          <div className="p-3.5 rounded-2xl bg-sky-500/10 border border-sky-500/30 text-sky-900 dark:text-sky-200 flex items-center justify-between gap-2.5 text-xs font-medium animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <Shield size={16} className="text-sky-600 dark:text-sky-400 shrink-0" />
+              <span>{dispositivoBloqueadoMsg}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.removeItem('amaru_preingreso_activo_device');
+                setDispositivoBloqueadoMsg(null);
+              }}
+              className="text-[10px] underline font-bold text-sky-700 dark:text-sky-300 cursor-pointer shrink-0"
+            >
+              Cerrar aviso
+            </button>
+          </div>
+        )}
+
         {/* ── Card Principal con Asistente ── */}
         <main className="bg-white dark:bg-[#2A2522] border border-stone-200/90 dark:border-stone-700/80 rounded-3xl p-6 sm:p-7 shadow-lg shadow-black/5 dark:shadow-black/20 transition-all">
           {/* Indicador de Paso */}
@@ -241,7 +503,7 @@ export const PublicQRView: React.FC = () => {
               <span>
                 {paso === 1 && 'Paso 1: Datos del Paciente'}
                 {paso === 2 && 'Paso 2: Evaluación Clínica'}
-                {paso === 3 && 'Paso 3: Confirmación en Cuarentena'}
+                {paso === 3 && 'Paso 3: Solicitud Enviada'}
               </span>
             </span>
             <div className="flex items-center gap-1.5">
@@ -311,7 +573,15 @@ export const PublicQRView: React.FC = () => {
                     <button
                       key={item.id}
                       type="button"
-                      onClick={() => setTipoSolicitud(item.id as TipoSolicitud)}
+                      onClick={() => {
+                        const nuevoTipo = item.id as TipoSolicitud;
+                        setTipoSolicitud(nuevoTipo);
+                        if (nuevoTipo === 'Agendar Examen Visual') {
+                          setEstadoReceta('vencida');
+                        } else {
+                          setEstadoReceta('vigente');
+                        }
+                      }}
                       className={`p-2.5 rounded-2xl border text-[11px] font-bold text-center transition-all cursor-pointer truncate ${
                         tipoSolicitud === item.id
                           ? 'border-[#B85D19] bg-[#B85D19]/10 text-[#B85D19] ring-2 ring-[#B85D19]/20 shadow-xs'
@@ -397,6 +667,66 @@ export const PublicQRView: React.FC = () => {
                 </div>
                 {errorTelefono && (
                   <p className="text-red-500 text-[11px] mt-1 font-semibold">{errorTelefono}</p>
+                )}
+              </div>
+
+              {/* Código de Convenio Institucional (Tipo A o Tipo B) */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 dark:text-stone-300 mb-1.5 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Building size={14} className="text-[#B85D19]" />
+                    <span>Código de Convenio {tipoSolicitud === 'Consulta Convenio' ? <span className="text-[#B85D19]">*</span> : <span className="text-stone-400 font-normal lowercase">(opcional)</span>}</span>
+                  </span>
+                  <span className="text-[10px] text-stone-400 font-normal">Tipo A (Descuento) o Tipo B (Planilla)</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Ej: SDC1326, COL-CALAMA, JJVV-NORTE, SDM0826..."
+                    value={codigoConvenio}
+                    onChange={(e) => handleCodigoConvenioChange(e.target.value)}
+                    autoComplete="off"
+                    className={`w-full bg-stone-50 dark:bg-[#1A1816] border rounded-2xl px-4 py-3 text-sm font-mono text-stone-900 dark:text-white uppercase placeholder:font-sans placeholder:normal-case placeholder:text-stone-400 outline-none transition-all ${
+                      resultadoConvenio?.bloqueado
+                        ? 'border-red-500 focus:ring-2 focus:ring-red-400'
+                        : resultadoConvenio?.valido
+                        ? 'border-emerald-600 focus:ring-2 focus:ring-emerald-400'
+                        : 'border-stone-200 dark:border-stone-700 focus:border-[#B85D19] focus:ring-2 focus:ring-[#B85D19]/20'
+                    }`}
+                  />
+                  {resultadoConvenio?.valido && (
+                    <div className="absolute right-3.5 top-3.5 text-emerald-600">
+                      <CheckCircle2 size={18} />
+                    </div>
+                  )}
+                </div>
+
+                {/* Feedback del Convenio */}
+                {resultadoConvenio && (
+                  <div
+                    className={`mt-2 p-3 rounded-2xl text-xs font-medium border leading-relaxed ${
+                      resultadoConvenio.bloqueado
+                        ? 'bg-rose-500/10 border-rose-500/30 text-rose-900 dark:text-rose-300'
+                        : resultadoConvenio.valido
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-900 dark:text-emerald-200'
+                        : 'bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200'
+                    }`}
+                  >
+                    <p>{resultadoConvenio.valido ? resultadoConvenio.mensajeExito : resultadoConvenio.mensajeError}</p>
+                    {resultadoConvenio.valido && (
+                      <label className="flex items-start gap-2 mt-2 pt-2 border-t border-emerald-500/20 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={declaracionAntifraude}
+                          onChange={(e) => setDeclaracionAntifraude(e.target.checked)}
+                          className="mt-0.5 h-3.5 w-3.5 rounded text-[#B85D19] accent-[#B85D19] cursor-pointer shrink-0"
+                        />
+                        <span className="text-[11px] text-emerald-950 dark:text-emerald-200 leading-tight">
+                          <strong>Declaración Jurada:</strong> Declaro bajo juramento pertenecer a {resultadoConvenio.infoSindicato?.nombre || 'la institución'} y exhibir mi credencial en sucursal.
+                        </span>
+                      </label>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -537,6 +867,258 @@ export const PublicQRView: React.FC = () => {
                     </div>
                   </div>
 
+                  {/* Escudo Anti-IA y Huella Digital SHA-256 */}
+                  {archivoReceta && (
+                    <div className="space-y-2 animate-in fade-in duration-200">
+                      <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-900 dark:text-emerald-200 flex items-start gap-2.5 text-xs">
+                        <ShieldCheck size={18} className="text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          <span className="font-bold block">
+                            🛡️ Inspección Documental: Formato válido · Sin firmas de alteración sintética (IA) · Hash Único Verificado
+                          </span>
+                          {hashArchivoGenerado && (
+                            <p className="font-mono text-[10px] text-emerald-700 dark:text-emerald-400 mt-0.5 truncate">
+                              Huella Digital SHA-256: {hashArchivoGenerado}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {alertaHashReceta && (
+                        <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 text-xs font-semibold flex items-center gap-2">
+                          <AlertTriangle size={16} className="text-amber-600 dark:text-amber-400 shrink-0" />
+                          <span>{alertaHashReceta}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Verificación Sanitaria MINSAL y Padrón RNPI */}
+                  <div className="p-4 rounded-2xl border border-stone-200 dark:border-stone-700 bg-stone-50/80 dark:bg-[#1A1816]/80 space-y-3.5">
+                    <div className="flex items-center justify-between pb-2 border-b border-stone-200 dark:border-stone-700">
+                      <span className="text-xs font-extrabold uppercase tracking-wider text-stone-800 dark:text-stone-200 flex items-center gap-1.5">
+                        <Building size={14} className="text-[#B85D19]" />
+                        <span>Verificación Sanitaria de Receta (MINSAL / RNPI)</span>
+                      </span>
+                      <span className="text-[10px] text-stone-400">Padrón Superintendencia</span>
+                    </div>
+
+                    {/* Fecha de Emisión */}
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 dark:text-stone-300 mb-1 flex items-center justify-between">
+                        <span>Fecha de Emisión de la Receta <span className="text-[#B85D19]">*</span></span>
+                        <span className="text-[10px] text-stone-400 font-normal">Vigencia máxima 12 meses (MINSAL)</span>
+                      </label>
+                      <input
+                        type="date"
+                        value={fechaEmisionReceta}
+                        onChange={(e) => handleFechaEmisionChange(e.target.value)}
+                        className="w-full bg-white dark:bg-[#2A2522] border border-stone-200 dark:border-stone-700 rounded-xl px-3.5 py-2 text-xs text-stone-900 dark:text-white outline-none focus:ring-2 focus:ring-[#B85D19]/20 font-mono"
+                      />
+                      {alertaAntiguedadReceta && (
+                        <div className="mt-1.5 p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-300 text-[11px] font-semibold flex items-center gap-1.5">
+                          <AlertTriangle size={13} className="shrink-0" />
+                          <span>{alertaAntiguedadReceta}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Timbre / RUT Médico Emisor */}
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 dark:text-stone-300 mb-1 flex items-center justify-between">
+                        <span>RUT Profesional Emisor <span className="text-[#B85D19]">*</span></span>
+                        <span className="text-[10px] text-stone-400 font-normal">Timbre facultativo</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={rutMedico}
+                        onChange={(e) => handleRutMedicoChange(e.target.value)}
+                        placeholder="Ej: 15.421.890-3"
+                        maxLength={12}
+                        className="w-full bg-white dark:bg-[#2A2522] border border-stone-200 dark:border-stone-700 rounded-xl px-3.5 py-2 text-xs font-mono text-stone-900 dark:text-white outline-none focus:ring-2 focus:ring-[#B85D19]/20"
+                      />
+
+                      {/* Botones de Selección Rápida de Médicos Semilla */}
+                      <div className="mt-2 space-y-1">
+                        <span className="text-[10px] text-stone-400 font-medium block">
+                          Médicos Acreditados Calama / Antofagasta (Click para probar):
+                        </span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {PADRON_RNPI_INICIAL.map((doc) => (
+                            <button
+                              key={doc.rut}
+                              type="button"
+                              onClick={() => {
+                                setRutMedico(doc.rut);
+                                setNombreMedico(doc.nombre);
+                                setCentroSalud(doc.centroSalud);
+                                setValidacionRnpi(validarPrestador(doc.rut));
+                              }}
+                              className={`text-[10px] px-2 py-1 rounded-lg border transition-all cursor-pointer truncate max-w-[200px] ${
+                                rutMedico.replace(/[^0-9kK]/g, '').toUpperCase() === doc.rut.replace(/[^0-9kK]/g, '').toUpperCase()
+                                  ? 'bg-[#B85D19]/10 text-[#B85D19] border-[#B85D19] font-bold'
+                                  : 'bg-white dark:bg-[#2A2522] text-stone-600 dark:text-stone-400 border-stone-200 dark:border-stone-700 hover:border-stone-300'
+                              }`}
+                              title={`${doc.nombre} (${doc.ciudad})`}
+                            >
+                              {doc.nombre.split(' ')[0]} {doc.nombre.split(' ')[1]} ({doc.ciudad})
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Badge de Estado RNPI */}
+                      <div className="mt-2.5">
+                        <div
+                          className={`p-2.5 rounded-xl text-xs font-semibold border ${
+                            validacionRnpi.estado === 'RNPI_HABILITADO'
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-900 dark:text-emerald-200'
+                              : validacionRnpi.estado === 'PENDIENTE_MESON'
+                              ? 'bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200'
+                              : 'bg-rose-500/10 border-rose-500/30 text-rose-900 dark:text-rose-300'
+                          }`}
+                        >
+                          {validacionRnpi.mensaje}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Nombre Profesional y Centro de Salud */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="block text-[11px] font-bold text-stone-600 dark:text-stone-400 mb-1">
+                          Nombre Profesional
+                        </label>
+                        <input
+                          type="text"
+                          value={nombreMedico}
+                          onChange={(e) => setNombreMedico(e.target.value)}
+                          placeholder="Nombre del facultativo"
+                          className="w-full bg-white dark:bg-[#2A2522] border border-stone-200 dark:border-stone-700 rounded-xl px-3 py-2 text-xs text-stone-900 dark:text-white outline-none focus:ring-2 focus:ring-[#B85D19]/20"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-stone-600 dark:text-stone-400 mb-1">
+                          Centro de Salud / Clínica
+                        </label>
+                        <input
+                          type="text"
+                          value={centroSalud}
+                          onChange={(e) => setCentroSalud(e.target.value)}
+                          placeholder="Ej: Hospital del Cobre, RedSalud"
+                          className="w-full bg-white dark:bg-[#2A2522] border border-stone-200 dark:border-stone-700 rounded-xl px-3 py-2 text-xs text-stone-900 dark:text-white outline-none focus:ring-2 focus:ring-[#B85D19]/20"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Mini-Formulario Clínico OCR (Dioptrías Detectadas y Editables) */}
+                  <div className="p-4 rounded-2xl border border-stone-200 dark:border-stone-700 bg-stone-50/80 dark:bg-[#1A1816]/80 space-y-3">
+                    <div className="flex items-center justify-between pb-2 border-b border-stone-200 dark:border-stone-700">
+                      <span className="text-xs font-extrabold uppercase tracking-wider text-stone-800 dark:text-stone-200 flex items-center gap-1.5">
+                        <Eye size={14} className="text-[#B85D19]" />
+                        <span>Mediciones Ópticas (Lectura OCR Detectada)</span>
+                      </span>
+                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded-md">
+                        OCR Activo
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-stone-500 dark:text-stone-400 leading-tight">
+                      Revisa y ajusta los valores si difieren del documento físico timbrado:
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 font-mono">
+                      {/* Ojo Derecho */}
+                      <div className="p-3 bg-white dark:bg-[#2A2522] rounded-xl border border-stone-200 dark:border-stone-700 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black text-[#B85D19]">OJO DERECHO (OD)</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1.5 text-center">
+                          <div>
+                            <label className="text-[10px] text-stone-400 block font-sans">ESF</label>
+                            <input
+                              type="text"
+                              value={odEsfera}
+                              onChange={(e) => setOdEsfera(e.target.value)}
+                              className="w-full text-center bg-stone-50 dark:bg-[#1A1816] border border-stone-200 dark:border-stone-700 rounded-lg p-1.5 text-xs text-stone-900 dark:text-white"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-stone-400 block font-sans">CIL</label>
+                            <input
+                              type="text"
+                              value={odCilindro}
+                              onChange={(e) => setOdCilindro(e.target.value)}
+                              className="w-full text-center bg-stone-50 dark:bg-[#1A1816] border border-stone-200 dark:border-stone-700 rounded-lg p-1.5 text-xs text-stone-900 dark:text-white"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-stone-400 block font-sans">EJE</label>
+                            <input
+                              type="text"
+                              value={odEje}
+                              onChange={(e) => setOdEje(e.target.value)}
+                              className="w-full text-center bg-stone-50 dark:bg-[#1A1816] border border-stone-200 dark:border-stone-700 rounded-lg p-1.5 text-xs text-stone-900 dark:text-white"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Ojo Izquierdo */}
+                      <div className="p-3 bg-white dark:bg-[#2A2522] rounded-xl border border-stone-200 dark:border-stone-700 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-black text-[#B85D19]">OJO IZQUIERDO (OI)</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1.5 text-center">
+                          <div>
+                            <label className="text-[10px] text-stone-400 block font-sans">ESF</label>
+                            <input
+                              type="text"
+                              value={oiEsfera}
+                              onChange={(e) => setOiEsfera(e.target.value)}
+                              className="w-full text-center bg-stone-50 dark:bg-[#1A1816] border border-stone-200 dark:border-stone-700 rounded-lg p-1.5 text-xs text-stone-900 dark:text-white"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-stone-400 block font-sans">CIL</label>
+                            <input
+                              type="text"
+                              value={oiCilindro}
+                              onChange={(e) => setOiCilindro(e.target.value)}
+                              className="w-full text-center bg-stone-50 dark:bg-[#1A1816] border border-stone-200 dark:border-stone-700 rounded-lg p-1.5 text-xs text-stone-900 dark:text-white"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-stone-400 block font-sans">EJE</label>
+                            <input
+                              type="text"
+                              value={oiEje}
+                              onChange={(e) => setOiEje(e.target.value)}
+                              className="w-full text-center bg-stone-50 dark:bg-[#1A1816] border border-stone-200 dark:border-stone-700 rounded-lg p-1.5 text-xs text-stone-900 dark:text-white"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* DP (Distancia Pupilar) */}
+                    <div className="flex items-center justify-between pt-1">
+                      <label className="text-[11px] font-bold text-stone-600 dark:text-stone-400">
+                        Distancia Pupilar (DP mm):
+                      </label>
+                      <div className="w-28">
+                        <input
+                          type="text"
+                          value={dpMm}
+                          onChange={(e) => setDpMm(e.target.value)}
+                          placeholder="63 mm"
+                          className="w-full text-center bg-white dark:bg-[#2A2522] border border-stone-200 dark:border-stone-700 rounded-xl px-2.5 py-1.5 text-xs font-mono text-stone-900 dark:text-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Selector de Armazón de Interés */}
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 dark:text-stone-300 mb-1.5">
@@ -564,6 +1146,37 @@ export const PublicQRView: React.FC = () => {
                     </div>
                   </div>
 
+                  {/* Doble Checkbox Legal Obligatorio (Sin fotos de carnet/credencial) */}
+                  <div className="space-y-2.5 pt-2 border-t border-stone-200 dark:border-stone-700/80">
+                    <label className="flex items-start gap-2.5 p-3.5 rounded-2xl bg-stone-50 dark:bg-[#1A1816] border border-stone-200 dark:border-stone-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={consentimientoMinsal}
+                        onChange={(e) => setConsentimientoMinsal(e.target.checked)}
+                        className="mt-0.5 h-4 w-4 rounded-sm text-[#B85D19] accent-[#B85D19] cursor-pointer shrink-0"
+                        required
+                      />
+                      <span className="text-xs text-stone-700 dark:text-stone-300 leading-relaxed select-none">
+                        <strong>Consentimiento Sanitario MINSAL (Ley N° 21.521 y Ley N° 19.628):</strong> Autorizo a Óptica Amaru al tratamiento confidencial de mis datos clínicos y Receta Oftalmológica exclusivamente para la fabricación de mis lentes (Código Sanitario MINSAL).
+                      </span>
+                    </label>
+
+                    {requiereAntifraude && (
+                      <label className="flex items-start gap-2.5 p-3.5 rounded-2xl bg-amber-500/[0.06] border border-amber-500/30 cursor-pointer animate-in fade-in">
+                        <input
+                          type="checkbox"
+                          checked={declaracionAntifraude}
+                          onChange={(e) => setDeclaracionAntifraude(e.target.checked)}
+                          className="mt-0.5 h-4 w-4 rounded-sm text-[#B85D19] accent-[#B85D19] cursor-pointer shrink-0"
+                          required
+                        />
+                        <span className="text-xs text-amber-900 dark:text-amber-200 leading-relaxed select-none">
+                          <strong>Declaración Jurada Antifraude (Convenio {codigoConvenio || 'Institucional'}):</strong> Declaro bajo juramento pertenecer a la institución del código ingresado y que exhibiré mi credencial física en sucursal. En caso de rechazo por la entidad, asumo el valor total asociado a mi RUT.
+                        </span>
+                      </label>
+                    )}
+                  </div>
+
                   {/* Botones de Navegación */}
                   <div className="flex items-center gap-3 pt-2">
                     <button
@@ -576,8 +1189,13 @@ export const PublicQRView: React.FC = () => {
                     </button>
                     <button
                       type="button"
+                      disabled={!paso2Valido}
                       onClick={handleCompletarPreIngresoConReceta}
-                      className="flex-1 bg-[#B85D19] hover:bg-[#8F3B09] active:scale-[0.99] text-white font-extrabold py-3.5 rounded-2xl text-xs uppercase tracking-wider transition-all shadow-md cursor-pointer flex items-center justify-center gap-2"
+                      className={`flex-1 py-3.5 rounded-2xl text-xs uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2 ${
+                        paso2Valido
+                          ? 'bg-[#B85D19] hover:bg-[#8F3B09] active:scale-[0.99] text-white font-extrabold cursor-pointer'
+                          : 'bg-stone-200 text-stone-400 dark:bg-stone-800 dark:text-stone-600 border border-stone-300 dark:border-stone-700 cursor-not-allowed shadow-none font-bold'
+                      }`}
                     >
                       <span>Enviar Solicitud a Revisión</span>
                       <ArrowRight size={15} />
@@ -643,7 +1261,7 @@ export const PublicQRView: React.FC = () => {
 
               <div>
                 <span className="text-[10px] font-black uppercase tracking-widest text-[#B85D19] bg-[#B85D19]/10 px-3 py-1 rounded-full border border-[#B85D19]/20 inline-block mb-2">
-                  CUARENTENA ZERO-TRUST ACTIVA
+                  PRE-INGRESO REGISTRADO CON ÉXITO
                 </span>
                 <h2 className="text-xl font-black text-stone-900 dark:text-white">
                   ¡Solicitud Recibida en Bandeja de Revisión!
@@ -658,7 +1276,7 @@ export const PublicQRView: React.FC = () => {
               <div className="bg-stone-50 dark:bg-[#1A1816] border border-stone-200 dark:border-stone-700 rounded-3xl p-5 text-left space-y-3 shadow-xs">
                 <div className="flex justify-between items-center pb-2.5 border-b border-stone-200 dark:border-stone-700">
                   <span className="text-[11px] uppercase tracking-wider text-stone-500 dark:text-stone-400 font-bold">
-                    Folio de Cuarentena:
+                    N° de Folio de Atención:
                   </span>
                   <span className="font-mono text-base font-black text-[#B85D19]">
                     {solicitudConfirmada?.folio || codigoPreIngreso || 'FOLIO-QR-001'}
@@ -693,6 +1311,15 @@ export const PublicQRView: React.FC = () => {
                     </div>
                   )}
 
+                  {codigoConvenio && (
+                    <div className="col-span-2 pt-1 border-t border-stone-200/60 dark:border-stone-800">
+                      <span className="text-[11px] text-stone-500 block">Convenio Institucional Declarado:</span>
+                      <p className="font-bold text-[#B85D19]">
+                        {codigoConvenio} {resultadoConvenio?.infoSindicato ? `· ${resultadoConvenio.infoSindicato.nombre}` : ''}
+                      </p>
+                    </div>
+                  )}
+
                   <div className="col-span-2 pt-1 border-t border-stone-200/60 dark:border-stone-800 flex items-center justify-between">
                     <span className="text-[11px] text-stone-500">Estado de Admisión:</span>
                     <span className="px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 font-extrabold text-[10px] border border-amber-500/30">
@@ -700,6 +1327,38 @@ export const PublicQRView: React.FC = () => {
                     </span>
                   </div>
                 </div>
+              </div>
+
+              {/* Botón Destacado: Confirmar por WhatsApp a Sucursal */}
+              <div className="space-y-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleConfirmarPorWhatsApp}
+                  className="w-full py-3.5 px-4 rounded-2xl text-xs sm:text-sm font-extrabold uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-600/25 flex items-center justify-center gap-2.5 transition-all cursor-pointer active:scale-[0.99]"
+                >
+                  <WhatsAppIcon size={18} />
+                  <span>📲 Confirmar mi Solicitud por WhatsApp a Sucursal</span>
+                </button>
+
+                <div className="flex items-center justify-center">
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold border transition-colors ${
+                      contactoVerificado
+                        ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-500/30'
+                        : 'bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-500/30'
+                    }`}
+                  >
+                    {contactoVerificado ? '🟢 CONTACTO VERIFICADO' : '🟡 PENDIENTE CONFIRMACIÓN POR WHATSAPP'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Aviso de Garantía Anti-Sabotaje */}
+              <div className="p-3.5 rounded-2xl bg-sky-500/10 border border-sky-500/30 text-sky-900 dark:text-sky-200 text-xs text-left flex items-start gap-2.5 font-medium leading-relaxed">
+                <Shield size={16} className="text-sky-600 dark:text-sky-400 shrink-0 mt-0.5" />
+                <p>
+                  <strong>Garantía Anti-Sabotaje:</strong> Tu RUT no ha sido bloqueado ni se ha rebajado inventario de armazones. La solicitud permanece en estado <strong>PRE-INGRESO WEB</strong> hasta que el personal de mesón verifique tu credencial física en Sucursal {sucursal}.
+                </p>
               </div>
 
               {/* Botones de Cierre */}

@@ -21,7 +21,18 @@ import {
   Glasses,
   FileText,
   BadgeCheck,
+  Trash2,
+  Receipt,
+  FileSpreadsheet,
+  Copy,
+  ExternalLink,
+  ShieldCheck,
 } from 'lucide-react';
+import {
+  validarPrestador,
+  enrolarPrestadorRNPI,
+  type PrestadorRNPI,
+} from '../services/rnpiService';
 import { db } from '../db/dexie';
 import { sincronizarColaOffline } from '../sw/syncService';
 import { validarRUT, normalizarInputRUT, formatearRUT } from '../utils/rut';
@@ -44,8 +55,15 @@ import {
 import {
   getSolicitudesRecetas,
   cambiarEstadoSolicitud,
+  descartarSolicitudReceta,
   type SolicitudReceta,
 } from '../services/recetasService';
+import {
+  validarCodigoSindicato,
+  registrarUsoCodigoSindicato,
+  calcularBeneficioConvenio,
+  type ResultadoValidacionCodigo,
+} from '../services/convenioSindicatoService';
 
 interface TerminalViewProps {
   isOnline: boolean;
@@ -131,12 +149,49 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
   const [empresaSeleccionada, setEmpresaSeleccionada] = useState(EMPRESAS_CONVENIO[0]);
   const [autorizacionBiometrica, setAutorizacionBiometrica] = useState(false);
 
+  // ── FASE 2: Convenios Institucionales, Validación Física Mesón & Candado 30 Días ──
+  const [codigoConvenio, setCodigoConvenio] = useState('SDC1326');
+  const [resultadoConvenio, setResultadoConvenio] = useState<ResultadoValidacionCodigo | null>(() =>
+    validarCodigoSindicato('SDC1326', '')
+  );
+  const [nroSocioMinero, setNroSocioMinero] = useState('');
+  const [fePublicaVerificacion, setFePublicaVerificacion] = useState<
+    'PRESENCIAL_VERIFICADO' | 'CUARENTENA_PRE_LABORATORIO'
+  >('PRESENCIAL_VERIFICADO');
+
+  // ── FASE 2: Arqueo de Caja y Medios de Pago Tributarios SII ──
+  const [medioPagoTributario, setMedioPagoTributario] = useState<
+    'TRANSBANK' | 'EFECTIVO' | 'PLANILLA_SINDICATO' | 'BONO_ISAPRE'
+  >('PLANILLA_SINDICATO');
+  const [voucherTransbank, setVoucherTransbank] = useState('');
+  const [folioBonoIsapre, setFolioBonoIsapre] = useState('');
+  const [documentoTributarioSII, setDocumentoTributarioSII] = useState<
+    'BOLETA_SII' | 'GUIA_FACTURA_COLECTIVO'
+  >('GUIA_FACTURA_COLECTIVO');
+
   // ── Paso 2: Validación Clínica y Armazón ─────────────────────────────────────
   const [tipoReceta, setTipoReceta] = useState<'vigente' | 'vencida'>('vigente');
   const [mostrarModalReceta, setMostrarModalReceta] = useState(false);
   const [recetaActiva, setRecetaActiva] = useState<RecetaOpticaItem | null>(null);
   const [skuSeleccionado, setSkuSeleccionado] = useState('EPP-TITAN-001');
   const [montoTotal, setMontoTotal] = useState('85000');
+
+  // ── Verificación Sanitaria MINSAL y Prestador RNPI ──
+  const [rutMedicoReceta, setRutMedicoReceta] = useState('15.421.890-3');
+  const [nombreMedicoReceta, setNombreMedicoReceta] = useState('Dr. Felipe Andrés Araya Cortés');
+  const [centroSaludReceta, setCentroSaludReceta] = useState('Hospital del Cobre Salvador Allende - Calama');
+  const [rnpiMedicoReceta, setRnpiMedicoReceta] = useState('384912');
+  const [especialidadMedicoReceta, setEspecialidadMedicoReceta] = useState('Médico Oftalmólogo');
+  const [mostrarModalEnrolarRNPI, setMostrarModalEnrolarRNPI] = useState(false);
+  const [feedbackCopiadoRNPI, setFeedbackCopiadoRNPI] = useState<string | null>(null);
+
+  // Enrolamiento rápido de facultativo en mesón
+  const [nuevoEnrolRut, setNuevoEnrolRut] = useState('');
+  const [nuevoEnrolNombre, setNuevoEnrolNombre] = useState('');
+  const [nuevoEnrolEspecialidad, setNuevoEnrolEspecialidad] = useState('Médico Oftalmólogo');
+  const [nuevoEnrolRnpi, setNuevoEnrolRnpi] = useState('');
+  const [nuevoEnrolCentro, setNuevoEnrolCentro] = useState('');
+  const [nuevoEnrolCiudad, setNuevoEnrolCiudad] = useState<'Calama' | 'Antofagasta'>('Calama');
 
   // ── Paso 3: Cotización, Stock y Medio de Pago ──────────────────────────────
   const [modalidadPago, setModalidadPago] = useState<'Planilla' | 'Abono50' | 'Total'>('Planilla');
@@ -303,33 +358,157 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
     }
 
     if (esMismoTitular) setRutTitular(formatearRUT(sol.rut));
+    if (sol.codigoConvenio) {
+      setCodigoConvenio(sol.codigoConvenio);
+      const res = validarCodigoSindicato(sol.codigoConvenio, sol.rut);
+      setResultadoConvenio(res);
+      if (res.infoSindicato?.tipo === 'TIPO_B') {
+        setMedioPagoTributario('PLANILLA_SINDICATO');
+        setDocumentoTributarioSII('GUIA_FACTURA_COLECTIVO');
+      }
+    }
+
+    // Autocompletar mediciones ópticas (OCR) y prestador facultativo si vienen de la web
+    if (sol.tipoReceta === 'vigente' || sol.odEsfera) {
+      setTipoReceta('vigente');
+      setRecetaActiva({
+        id_receta: `REC-WEB-${sol.folio || sol.id}`,
+        rut_paciente: sol.rut,
+        fecha_emision: sol.fechaEmisionReceta || new Date().toISOString().split('T')[0],
+        parametros_oftalmologicos: {
+          ojo_derecho: {
+            esfera: sol.odEsfera || '-1.50',
+            cilindro: sol.odCilindro || '-0.50',
+            eje: sol.odEje ? sol.odEje.replace('°', '') : '90',
+            dp: sol.dpMm || '63',
+          },
+          ojo_izquierdo: {
+            esfera: sol.oiEsfera || '-1.25',
+            cilindro: sol.oiCilindro || '-0.75',
+            eje: sol.oiEje ? sol.oiEje.replace('°', '') : '85',
+            dp: sol.dpMm || '63',
+          },
+        },
+        version_seq: 1,
+        es_vigente: true,
+        dias_antiguedad: 10,
+      });
+
+      if (sol.rutMedico) {
+        setRutMedicoReceta(sol.rutMedico);
+        const resRNPI = validarPrestador(sol.rutMedico);
+        if (resRNPI.prestador) {
+          setNombreMedicoReceta(resRNPI.prestador.nombre);
+          setCentroSaludReceta(resRNPI.prestador.centroSalud);
+          setRnpiMedicoReceta(resRNPI.prestador.rnpi);
+          setEspecialidadMedicoReceta(resRNPI.prestador.especialidad);
+        } else {
+          setNombreMedicoReceta(sol.nombreMedico || '');
+          setCentroSaludReceta(sol.centroSalud || '');
+        }
+      }
+    } else if (sol.tipoReceta === 'sin_receta') {
+      setTipoReceta('vencida');
+    }
 
     setMensajeSync(`✓ Pre-ingreso web cargado para ${sol.nombre} (${sol.rut}).`);
     setCurrentStep(1);
   };
 
-  // Validar y Aprobar Stock directo desde la bandeja
+  // Descartar Solicitud Spam o No Confirmada
+  const handleDescartarSpam = (id: string, nombre: string) => {
+    descartarSolicitudReceta(id);
+    refrescarDatos();
+    setMensajeSync(`🗑️ Solicitud web de ${nombre} descartada. No se afectó stock ni se bloqueó al RUT.`);
+  };
+
+  // Validar y Aprobar Stock directo desde la bandeja con activación de candado de 30 días
   const handleAprobarSolicitudDirecta = (sol: SolicitudReceta) => {
     cambiarEstadoSolicitud(sol.id, 'APROBADA');
     descontarStock(sol.armazon, sol.ciudad, 1);
+
+    if (sol.codigoConvenio) {
+      registrarUsoCodigoSindicato({
+        rut: sol.rut,
+        codigo: sol.codigoConvenio,
+        sindicato: sol.empresa || 'Convenio Institucional',
+        folio: sol.folio,
+        verificacionMeson: 'PRESENCIAL_VERIFICADO',
+      });
+    }
+
+    // Registro forense para Auditor
+    try {
+      const raw = localStorage.getItem('amaru_anulaciones_rectificaciones');
+      const current = raw ? JSON.parse(raw) : [];
+      const nuevoEvt = {
+        id: `REG-POS-${Date.now()}`,
+        tipo: 'VENTA_POS',
+        folio: sol.folio,
+        paciente: sol.nombre,
+        rut: formatearRUT(sol.rut),
+        fechaHoraExacta: new Date().toLocaleString('es-CL'),
+        responsable: localStorage.getItem('amaru_nombre_vendedor') || 'Carlos Rojas Morales',
+        motivo: `Aprobación en Mesón Pre-Ingreso Web · Sucursal ${sol.ciudad}`,
+        detalles: `Armazón: ${sol.armazon} · Monto: $${sol.monto.toLocaleString('es-CL')} CLP ${
+          sol.codigoConvenio ? `· Convenio: ${sol.codigoConvenio} (30 días de carencia activados)` : ''
+        }`,
+        sucursal: sol.ciudad,
+      };
+      localStorage.setItem('amaru_anulaciones_rectificaciones', JSON.stringify([nuevoEvt, ...current]));
+      window.dispatchEvent(new Event('amaru_anulaciones_updated'));
+    } catch {
+      // ignore
+    }
+
     refrescarDatos();
-    setMensajeSync(`✓ Solicitud de ${sol.nombre} aprobada. Se descontó 1 unidad de stock en ${sol.ciudad}.`);
+    setMensajeSync(`✓ Solicitud de ${sol.nombre} aprobada en mesón. Stock descontado en ${sol.ciudad}.`);
+  };
+
+  const handleCodigoConvenioChange = (cod: string) => {
+    const limpio = cod.trim().toUpperCase();
+    setCodigoConvenio(limpio);
+    if (!limpio) {
+      setResultadoConvenio(null);
+      return;
+    }
+    const res = validarCodigoSindicato(limpio, rutPaciente);
+    setResultadoConvenio(res);
+    if (res.infoSindicato) {
+      setEmpresaSeleccionada(res.infoSindicato.empresa);
+      if (res.infoSindicato.tipo === 'TIPO_B') {
+        setMedioPagoTributario('PLANILLA_SINDICATO');
+        setDocumentoTributarioSII('GUIA_FACTURA_COLECTIVO');
+      } else {
+        setMedioPagoTributario('TRANSBANK');
+        setDocumentoTributarioSII('BOLETA_SII');
+      }
+    }
   };
 
   // Validaciones de pasos
+  const esConvenioTipoB =
+    tipoUsuario === 'Convenio' &&
+    (!resultadoConvenio || resultadoConvenio.infoSindicato?.tipo === 'TIPO_B');
+  const validacionSocioMinero = !esConvenioTipoB || nroSocioMinero.trim().length >= 2;
+
   const paso1Valido =
-    !!rutPaciente &&
+    Boolean(rutPaciente) &&
     validarRUT(rutPaciente) &&
     nombrePaciente.trim().length >= 3 &&
-    !!telefonoPaciente.trim() &&
-    autorizacionBiometrica;
+    Boolean(telefonoPaciente.trim()) &&
+    autorizacionBiometrica &&
+    (tipoUsuario !== 'Convenio' || !resultadoConvenio?.bloqueado) &&
+    validacionSocioMinero;
 
   const paso2Valido =
-    tipoReceta === 'vigente' && !!skuSeleccionado;
+    tipoReceta === 'vigente' && Boolean(skuSeleccionado);
 
   const paso3Valido =
-    (modalidadPago !== 'Planilla' || (!!rutTitular && validarRUT(rutTitular))) &&
-    Number(montoTotal) > 0;
+    Number(montoTotal) > 0 &&
+    (medioPagoTributario !== 'TRANSBANK' || voucherTransbank.trim().length >= 3) &&
+    (medioPagoTributario !== 'BONO_ISAPRE' || folioBonoIsapre.trim().length >= 3) &&
+    (medioPagoTributario !== 'PLANILLA_SINDICATO' || (Boolean(rutTitular) && validarRUT(rutTitular)));
 
   const handleLimpiarTodo = () => {
     setRutPaciente('');
@@ -339,6 +518,9 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
     setErrorRutPaciente('');
     setRutTitular('');
     setErrorRutTitular('');
+    setNroSocioMinero('');
+    setVoucherTransbank('');
+    setFolioBonoIsapre('');
     setClienteReconocido(false);
     setAutorizacionBiometrica(false);
     setTipoReceta('vigente');
@@ -357,7 +539,7 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
 
     // Generar cuotas para modalidad planilla
     const cuotasArray =
-      modalidadPago === 'Planilla'
+      modalidadPago === 'Planilla' || medioPagoTributario === 'PLANILLA_SINDICATO'
         ? Array.from({ length: numCuotas }, (_, idx) => {
             const d = new Date();
             d.setMonth(d.getMonth() + idx + 1);
@@ -387,6 +569,55 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
 
     // Descontar 1 unidad en el inventario de la sucursal activa
     descontarStock(skuSeleccionado, sucursalActiva, 1);
+
+    // Si tiene convenio institucional activo, activar el candado de 30 días
+    if (tipoUsuario === 'Convenio' && codigoConvenio.trim()) {
+      registrarUsoCodigoSindicato({
+        rut: formatearRUT(rutPaciente),
+        codigo: codigoConvenio,
+        sindicato: resultadoConvenio?.infoSindicato?.nombre || empresaSeleccionada,
+        folio: nuevoFolio,
+        tipoConvenio: resultadoConvenio?.infoSindicato?.tipo || 'TIPO_B',
+        nroSocio: nroSocioMinero.trim() || undefined,
+        verificacionMeson: fePublicaVerificacion,
+      });
+    }
+
+    // Registro en la Bitácora Forense del Auditor
+    try {
+      const raw = localStorage.getItem('amaru_anulaciones_rectificaciones');
+      const current = raw ? JSON.parse(raw) : [];
+      const nuevoEvt = {
+        id: `REG-POS-${Date.now()}`,
+        tipo: 'VENTA_POS',
+        folio: nuevoFolio,
+        paciente: nombrePaciente,
+        rut: formatearRUT(rutPaciente),
+        fechaHoraExacta: new Date().toLocaleString('es-CL'),
+        responsable: localStorage.getItem('amaru_nombre_vendedor') || 'Carlos Rojas Morales',
+        motivo: `Emisión de Venta en Mesón (${sucursalActiva}) · Doc SII: ${
+          documentoTributarioSII === 'BOLETA_SII' ? 'Boleta Electrónica' : 'Factura Convenio Colectivo'
+        }`,
+        detalles: `Medio: ${medioPagoTributario} · Total: $${Number(montoTotal).toLocaleString('es-CL')} CLP ${
+          medioPagoTributario === 'TRANSBANK'
+            ? `(Voucher: ${voucherTransbank})`
+            : medioPagoTributario === 'BONO_ISAPRE'
+            ? `(Bono I-Med: ${folioBonoIsapre})`
+            : ''
+        }${
+          tipoUsuario === 'Convenio' && codigoConvenio
+            ? ` · Convenio: ${codigoConvenio} (${fePublicaVerificacion}${
+                nroSocioMinero ? ` · Socio: ${nroSocioMinero}` : ''
+              })`
+            : ''
+        }`,
+        sucursal: sucursalActiva,
+      };
+      localStorage.setItem('amaru_anulaciones_rectificaciones', JSON.stringify([nuevoEvt, ...current]));
+      window.dispatchEvent(new Event('amaru_anulaciones_updated'));
+    } catch {
+      // ignore
+    }
 
     // Notificar eventos reactivos
     window.dispatchEvent(new CustomEvent('amaru_sync_updated'));
@@ -504,7 +735,7 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
                   </span>
                 </div>
 
-                <div className="text-[11px] text-slate-600 dark:text-zinc-300 space-y-0.5">
+                <div className="text-[11px] text-slate-600 dark:text-zinc-300 space-y-1">
                   <div className="flex items-center gap-1.5 truncate">
                     <Glasses size={12} className="text-amaru-copper shrink-0" />
                     <span className="font-semibold truncate">{sol.armazon}</span>
@@ -512,6 +743,24 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
                   <div className="flex items-center gap-1.5 text-slate-500 dark:text-zinc-400 text-[10px]">
                     <FileText size={11} className="shrink-0" />
                     <span className="truncate">{sol.archivoNombre}</span>
+                  </div>
+
+                  {/* Estado de Verificación WhatsApp & Convenio */}
+                  <div className="flex items-center justify-between pt-1">
+                    <span
+                      className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                        sol.contactoVerificado
+                          ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border-emerald-500/30'
+                          : 'bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-500/30'
+                      }`}
+                    >
+                      {sol.contactoVerificado ? '🟢 CONTACTO VERIFICADO' : '🟡 PENDIENTE CONTACTO'}
+                    </span>
+                    {sol.codigoConvenio && (
+                      <span className="font-mono text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-[#B85D19]/10 text-amaru-copper border border-amaru-copper/20">
+                        {sol.codigoConvenio}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -531,9 +780,9 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
                   <button
                     type="button"
                     onClick={() => handleCargarSolicitudWeb(sol)}
-                    className="flex-1 py-1.5 px-2.5 rounded-xl bg-amaru-copper/10 hover:bg-amaru-copper/20 text-amaru-copper font-bold text-[11px] transition-all flex items-center justify-center gap-1 cursor-pointer"
+                    className="flex-1 py-1.5 px-2 rounded-xl bg-amaru-copper/10 hover:bg-amaru-copper/20 text-amaru-copper font-bold text-[11px] transition-all flex items-center justify-center gap-1 cursor-pointer truncate"
                   >
-                    <span>Cargar en Atención</span>
+                    <span>Cargar</span>
                     <ArrowRight size={12} />
                   </button>
 
@@ -544,6 +793,15 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
                     title="Aprobar directamente y descontar stock"
                   >
                     Aprobar
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleDescartarSpam(sol.id, sol.nombre)}
+                    className="p-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20 transition-all cursor-pointer"
+                    title="Descartar spam / no confirmado (sin descontar stock ni bloquear RUT)"
+                  >
+                    <Trash2 size={13} />
                   </button>
                 </div>
               </div>
@@ -827,27 +1085,127 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
 
                 {/* Badges de Ayuda al Vendedor según tipo */}
                 {tipoUsuario === 'Convenio' && (
-                  <div className="mt-3 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs space-y-2 animate-in fade-in duration-150">
-                    <div className="flex items-center gap-2 text-amber-900 dark:text-amber-200 font-bold">
-                      <CheckCircle2 size={14} className="text-amaru-copper" />
-                      <span>✓ Beneficio Convenio Activo · Tope Cobertura: $150.000 CLP</span>
+                  <div className="mt-3 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs space-y-3 animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-amber-900 dark:text-amber-200 font-bold">
+                        <CheckCircle2 size={15} className="text-amaru-copper shrink-0" />
+                        <span>Gestión Blindada de Convenio Institucional</span>
+                      </div>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-800 dark:text-amber-300 font-extrabold uppercase">
+                        Carencia 30 Días
+                      </span>
                     </div>
+
+                    {/* Selector / Input de Código de Convenio */}
                     <div>
                       <label className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-zinc-400 block mb-1">
-                        Empresa / Sindicato en Faena *
+                        Código de Convenio Activo *
                       </label>
-                      <select
-                        value={empresaSeleccionada}
-                        onChange={(e) => setEmpresaSeleccionada(e.target.value)}
-                        className="w-full bg-white dark:bg-[#1E1C1A] border border-slate-300 dark:border-white/10 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 dark:text-white focus:ring-2 focus:ring-amaru-copper outline-hidden"
-                      >
-                        {EMPRESAS_CONVENIO.map((emp) => (
-                          <option key={emp} value={emp}>
-                            {emp}
-                          </option>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={codigoConvenio}
+                          onChange={(e) => handleCodigoConvenioChange(e.target.value)}
+                          placeholder="SDC1326, COL-CALAMA..."
+                          className="flex-1 bg-white dark:bg-[#1E1C1A] border border-slate-300 dark:border-white/10 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900 dark:text-white uppercase focus:ring-2 focus:ring-amaru-copper outline-hidden"
+                        />
+                      </div>
+
+                      {/* Accesos rápidos de convenios */}
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {['SDC1326', 'SDM0826', 'SDE1126', 'GOB-LOA26', 'COL-CALAMA', 'JJVV-NORTE'].map((c) => (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => handleCodigoConvenioChange(c)}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                              codigoConvenio === c
+                                ? 'bg-amaru-copper text-white shadow-2xs'
+                                : 'bg-white/80 dark:bg-black/30 text-slate-700 dark:text-zinc-300 border border-slate-200 dark:border-white/10 hover:border-amaru-copper'
+                            }`}
+                          >
+                            {c}
+                          </button>
                         ))}
-                      </select>
+                      </div>
                     </div>
+
+                    {/* Feedback y clasificación del convenio */}
+                    {resultadoConvenio && (
+                      <div
+                        className={`p-2.5 rounded-xl text-xs font-medium border leading-relaxed ${
+                          resultadoConvenio.bloqueado
+                            ? 'bg-rose-500/10 border-rose-500/30 text-rose-900 dark:text-rose-300'
+                            : resultadoConvenio.valido
+                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-900 dark:text-emerald-200'
+                            : 'bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200'
+                        }`}
+                      >
+                        {resultadoConvenio.valido ? resultadoConvenio.mensajeExito : resultadoConvenio.mensajeError}
+                      </div>
+                    )}
+
+                    {/* Control Físico Sin Fotos para Tipo B (Planilla / Subvención) */}
+                    {esConvenioTipoB && (
+                      <div className="pt-2 border-t border-amber-500/20 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-700 dark:text-zinc-300">
+                            N° de Socio / Rol Minero o Folio de Pase *
+                          </label>
+                          <a
+                            href={`https://wa.me/56985860973?text=${encodeURIComponent(
+                              `Estimada directiva sindicato/bienestar ${empresaSeleccionada}: Consulta de verificación de socio RUT ${formatearRUT(
+                                rutPaciente
+                              )} (N° Socio: ${nroSocioMinero.trim() || 'En evaluación'}) para confección de lentes ópticos en Óptica Amaru Sucursal ${sucursalActiva}.`
+                            )}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 cursor-pointer"
+                            title="Consultar socio con directiva sindical vía WhatsApp"
+                          >
+                            <WhatsAppIcon size={12} />
+                            <span>📲 Consultar Socio a Directiva</span>
+                          </a>
+                        </div>
+
+                        <input
+                          type="text"
+                          placeholder="Ej: ROL-88421 / COD-9912"
+                          value={nroSocioMinero}
+                          onChange={(e) => setNroSocioMinero(e.target.value.toUpperCase())}
+                          className="w-full bg-white dark:bg-[#1E1C1A] border border-slate-300 dark:border-white/10 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900 dark:text-white uppercase focus:ring-2 focus:ring-amaru-copper outline-hidden"
+                        />
+
+                        {/* Fe Pública del Vendedor vs Cuarentena Pre-Laboratorio */}
+                        <div className="space-y-1.5 pt-1">
+                          <label className="flex items-start gap-2 p-2.5 rounded-xl bg-white/80 dark:bg-black/30 border border-slate-200 dark:border-white/10 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="fePublica"
+                              checked={fePublicaVerificacion === 'PRESENCIAL_VERIFICADO'}
+                              onChange={() => setFePublicaVerificacion('PRESENCIAL_VERIFICADO')}
+                              className="mt-0.5 text-amaru-copper accent-amaru-copper cursor-pointer"
+                            />
+                            <span className="text-[11px] text-slate-700 dark:text-zinc-300 leading-tight">
+                              <strong>👁️ Doy fe de haber verificado presencialmente</strong> la Credencial Sindical/Corporativa física del titular en mesón (No se almacenan fotografías de documentos por Ley N° 21.521).
+                            </span>
+                          </label>
+
+                          <label className="flex items-start gap-2 p-2.5 rounded-xl bg-white/80 dark:bg-black/30 border border-slate-200 dark:border-white/10 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="fePublica"
+                              checked={fePublicaVerificacion === 'CUARENTENA_PRE_LABORATORIO'}
+                              onChange={() => setFePublicaVerificacion('CUARENTENA_PRE_LABORATORIO')}
+                              className="mt-0.5 text-amber-600 accent-amber-600 cursor-pointer"
+                            />
+                            <span className="text-[11px] text-slate-700 dark:text-zinc-300 leading-tight">
+                              <strong>⏳ Dejar en Cuarentena Pre-Laboratorio:</strong> Requiere confirmación con Directiva Sindical por WhatsApp antes de tallar y biselar cristal.
+                            </span>
+                          </label>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1037,6 +1395,286 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
                     </div>
                   )}
 
+                  {/* Panel de Verificación Sanitaria y Facultativo RNPI */}
+                  <div className="bg-stone-50 dark:bg-black/25 border border-stone-200 dark:border-white/10 rounded-2xl p-4 space-y-3">
+                    <div className="flex items-center justify-between pb-2 border-b border-stone-200/80 dark:border-white/10">
+                      <div className="flex items-center gap-2">
+                        <Building size={16} className="text-[#B85D19]" />
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                          🏛️ Verificación Sanitaria de Receta y Prestador (MINSAL / RNPI)
+                        </h4>
+                      </div>
+                      <span className="text-[10px] font-semibold text-slate-400">
+                        Padrón Oficial Offline-First
+                      </span>
+                    </div>
+
+                    {/* Semáforo de Estado RNPI */}
+                    {(() => {
+                      const resRNPI = validarPrestador(rutMedicoReceta);
+                      const esHabilitado = resRNPI.estado === 'RNPI_HABILITADO';
+                      const esInvalido = resRNPI.estado === 'RUT_INVALIDO';
+
+                      return (
+                        <div
+                          className={`p-3 rounded-xl border text-xs leading-relaxed flex items-start gap-2.5 ${
+                            esHabilitado
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-900 dark:text-emerald-200'
+                              : esInvalido
+                              ? 'bg-rose-500/10 border-rose-500/30 text-rose-900 dark:text-rose-300'
+                              : 'bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200'
+                          }`}
+                        >
+                          <ShieldCheck size={16} className={`shrink-0 mt-0.5 ${esHabilitado ? 'text-emerald-600' : 'text-amber-600'}`} />
+                          <div className="flex-1">
+                            {esHabilitado ? (
+                              <>
+                                <strong className="block text-emerald-950 dark:text-emerald-100">
+                                  🟢 Prestador Habilitado en Padrón RNPI
+                                </strong>
+                                <span>
+                                  {resRNPI.prestador?.nombre} · {resRNPI.prestador?.especialidad} · Registro Superintendencia #{resRNPI.prestador?.rnpi} ({resRNPI.prestador?.centroSalud})
+                                </span>
+                              </>
+                            ) : esInvalido ? (
+                              <>
+                                <strong className="block text-rose-950 dark:text-rose-100">
+                                  🔴 Timbre / RUT Médico Inválido (Fallo Módulo 11)
+                                </strong>
+                                <span>Verifique el timbre legible en la receta física.</span>
+                              </>
+                            ) : (
+                              <>
+                                <strong className="block text-amber-950 dark:text-amber-100">
+                                  🟡 Pendiente Consulta Superintendencia
+                                </strong>
+                                <span>
+                                  RUT {rutMedicoReceta ? formatearRUT(rutMedicoReceta) : 'profesional'} es matemáticamente válido, pero no figura en el padrón local norte. Consulta el portal RNPI e incorpóralo.
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Inputs de Identificación Facultativo */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                      <div>
+                        <label className="text-[11px] font-semibold text-slate-600 dark:text-zinc-400 block mb-1">
+                          RUT Facultativo:
+                        </label>
+                        <input
+                          type="text"
+                          value={rutMedicoReceta}
+                          onChange={(e) => {
+                            const val = normalizarInputRUT(e.target.value);
+                            setRutMedicoReceta(val);
+                            if (val.length >= 7) {
+                              const r = validarPrestador(val);
+                              if (r.prestador) {
+                                setNombreMedicoReceta(r.prestador.nombre);
+                                setCentroSaludReceta(r.prestador.centroSalud);
+                                setRnpiMedicoReceta(r.prestador.rnpi);
+                                setEspecialidadMedicoReceta(r.prestador.especialidad);
+                              }
+                            }
+                          }}
+                          placeholder="15.421.890-3"
+                          className="w-full bg-white dark:bg-[#1A1816] border border-slate-300 dark:border-zinc-700 rounded-xl px-2.5 py-1.5 font-mono text-slate-900 dark:text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-semibold text-slate-600 dark:text-zinc-400 block mb-1">
+                          Nombre Profesional:
+                        </label>
+                        <input
+                          type="text"
+                          value={nombreMedicoReceta}
+                          onChange={(e) => setNombreMedicoReceta(e.target.value)}
+                          placeholder="Dr. Nombre Apellido"
+                          className="w-full bg-white dark:bg-[#1A1816] border border-slate-300 dark:border-zinc-700 rounded-xl px-2.5 py-1.5 text-slate-900 dark:text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-semibold text-slate-600 dark:text-zinc-400 block mb-1">
+                          Centro / Institución:
+                        </label>
+                        <input
+                          type="text"
+                          value={centroSaludReceta}
+                          onChange={(e) => setCentroSaludReceta(e.target.value)}
+                          placeholder="Hospital del Cobre, RedSalud..."
+                          className="w-full bg-white dark:bg-[#1A1816] border border-slate-300 dark:border-zinc-700 rounded-xl px-2.5 py-1.5 text-slate-900 dark:text-white"
+                        />
+                      </div>
+                    </div>
+
+                    {rnpiMedicoReceta && (
+                      <div className="flex items-center gap-3 text-[11px] text-slate-500 dark:text-zinc-400 pt-0.5">
+                        <span>Especialidad: <strong className="text-slate-700 dark:text-zinc-200">{especialidadMedicoReceta}</strong></span>
+                        <span>•</span>
+                        <span>Reg. RNPI: <strong className="font-mono text-slate-700 dark:text-zinc-200">#{rnpiMedicoReceta}</strong></span>
+                      </div>
+                    )}
+
+                    {/* Botones de Acción Oficial RNPI */}
+                    <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const rutTarget = rutMedicoReceta ? formatearRUT(rutMedicoReceta) : '';
+                          if (rutTarget && navigator.clipboard) {
+                            navigator.clipboard.writeText(rutTarget);
+                          }
+                          setFeedbackCopiadoRNPI(`RUT ${rutTarget} copiado. Abriendo Superintendencia...`);
+                          setTimeout(() => setFeedbackCopiadoRNPI(null), 4000);
+                          window.open('https://rnpi.superdesalud.gob.cl/', '_blank', 'noopener,noreferrer');
+                        }}
+                        className="flex-1 border border-slate-300 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-200 text-xs font-semibold py-2 px-3 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                      >
+                        <Copy size={13} className="text-[#B85D19]" />
+                        <span>🔍 Copiar RUT Médico y Abrir Portal Oficial RNPI</span>
+                        <ExternalLink size={12} className="text-slate-400" />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNuevoEnrolRut(rutMedicoReceta);
+                          setNuevoEnrolNombre(nombreMedicoReceta);
+                          setNuevoEnrolCentro(centroSaludReceta);
+                          setMostrarModalEnrolarRNPI(!mostrarModalEnrolarRNPI);
+                        }}
+                        className="border border-[#B85D19]/40 bg-[#B85D19]/10 hover:bg-[#B85D19] text-[#B85D19] hover:text-white text-xs font-bold py-2 px-3 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all"
+                      >
+                        <span>➕ Validar e Incorporar Profesional al Padrón Local RNPI</span>
+                      </button>
+                    </div>
+
+                    {feedbackCopiadoRNPI && (
+                      <p className="text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold flex items-center gap-1.5">
+                        <CheckCircle2 size={13} />
+                        <span>{feedbackCopiadoRNPI}</span>
+                      </p>
+                    )}
+
+                    {/* Mini Formulario In-line de Enrolamiento de Mesón */}
+                    {mostrarModalEnrolarRNPI && (
+                      <div className="p-3.5 bg-white dark:bg-[#1A1816] border border-[#B85D19]/30 rounded-xl space-y-2.5 animate-in fade-in duration-200">
+                        <div className="flex items-center justify-between pb-1 border-b border-stone-200 dark:border-stone-800">
+                          <span className="text-xs font-bold text-[#B85D19]">
+                            Enrolar Nuevo Profesional en Padrón Local RNPI
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setMostrarModalEnrolarRNPI(false)}
+                            className="text-[11px] text-slate-400 hover:text-slate-600 cursor-pointer"
+                          >
+                            ✕ Cancelar
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          <div>
+                            <label className="text-[10px] font-semibold text-slate-500 block mb-0.5">RUT Facultativo:</label>
+                            <input
+                              type="text"
+                              value={nuevoEnrolRut}
+                              onChange={(e) => setNuevoEnrolRut(normalizarInputRUT(e.target.value))}
+                              placeholder="12.345.678-9"
+                              className="w-full bg-slate-50 dark:bg-black/30 border border-slate-300 dark:border-zinc-700 rounded-lg p-1.5 font-mono"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-semibold text-slate-500 block mb-0.5">Nombre Completo:</label>
+                            <input
+                              type="text"
+                              value={nuevoEnrolNombre}
+                              onChange={(e) => setNuevoEnrolNombre(e.target.value)}
+                              placeholder="Dr. Juan Pérez"
+                              className="w-full bg-slate-50 dark:bg-black/30 border border-slate-300 dark:border-zinc-700 rounded-lg p-1.5"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-semibold text-slate-500 block mb-0.5">Especialidad:</label>
+                            <select
+                              value={nuevoEnrolEspecialidad}
+                              onChange={(e) => setNuevoEnrolEspecialidad(e.target.value)}
+                              className="w-full bg-slate-50 dark:bg-black/30 border border-slate-300 dark:border-zinc-700 rounded-lg p-1.5"
+                            >
+                              <option value="Médico Oftalmólogo">Médico Oftalmólogo</option>
+                              <option value="Tecnólogo Médico Mención Oftalmología">Tecnólogo Médico Mención Oftalmología</option>
+                              <option value="Optometrista">Optometrista</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-semibold text-slate-500 block mb-0.5">N° Registro RNPI Superintendencia:</label>
+                            <input
+                              type="text"
+                              value={nuevoEnrolRnpi}
+                              onChange={(e) => setNuevoEnrolRnpi(e.target.value)}
+                              placeholder="Ej: 549812"
+                              className="w-full bg-slate-50 dark:bg-black/30 border border-slate-300 dark:border-zinc-700 rounded-lg p-1.5 font-mono"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-semibold text-slate-500 block mb-0.5">Centro de Salud:</label>
+                            <input
+                              type="text"
+                              value={nuevoEnrolCentro}
+                              onChange={(e) => setNuevoEnrolCentro(e.target.value)}
+                              placeholder="Hospital del Cobre, RedSalud..."
+                              className="w-full bg-slate-50 dark:bg-black/30 border border-slate-300 dark:border-zinc-700 rounded-lg p-1.5"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-semibold text-slate-500 block mb-0.5">Jurisdicción / Ciudad:</label>
+                            <select
+                              value={nuevoEnrolCiudad}
+                              onChange={(e) => setNuevoEnrolCiudad(e.target.value as 'Calama' | 'Antofagasta')}
+                              className="w-full bg-slate-50 dark:bg-black/30 border border-slate-300 dark:border-zinc-700 rounded-lg p-1.5"
+                            >
+                              <option value="Calama">Calama</option>
+                              <option value="Antofagasta">Antofagasta</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="pt-1 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!nuevoEnrolRut.trim() || !nuevoEnrolNombre.trim() || !nuevoEnrolRnpi.trim()) {
+                                alert('Por favor complete RUT, Nombre y N° de Registro RNPI.');
+                                return;
+                              }
+                              const nuevo: PrestadorRNPI = {
+                                rut: formatearRUT(nuevoEnrolRut),
+                                nombre: nuevoEnrolNombre.trim(),
+                                especialidad: nuevoEnrolEspecialidad,
+                                rnpi: nuevoEnrolRnpi.trim(),
+                                centroSalud: nuevoEnrolCentro.trim() || 'Consulta Particular',
+                                ciudad: nuevoEnrolCiudad,
+                              };
+                              enrolarPrestadorRNPI(nuevo);
+                              setRutMedicoReceta(nuevo.rut);
+                              setNombreMedicoReceta(nuevo.nombre);
+                              setCentroSaludReceta(nuevo.centroSalud);
+                              setRnpiMedicoReceta(nuevo.rnpi);
+                              setEspecialidadMedicoReceta(nuevo.especialidad);
+                              setMostrarModalEnrolarRNPI(false);
+                              setMensajeSync(`✓ Profesional ${nuevo.nombre} incorporado con éxito al Padrón Local RNPI.`);
+                            }}
+                            className="bg-[#B85D19] hover:bg-[#8F3B09] text-white text-xs font-bold py-1.5 px-4 rounded-xl cursor-pointer transition-colors shadow-sm"
+                          >
+                            Guardar en Padrón Local RNPI
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   {/* Catálogo de Armazones con Stock en Vivo */}
                   <div>
                     <div className="flex items-center justify-between mb-2">
@@ -1210,64 +1848,187 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
                 </div>
               </div>
 
-              {/* Selector de Modalidad de Pago / Abono */}
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-zinc-300 mb-2">
-                  Modalidad de Pago / Abono <span className="text-amaru-copper">*</span>
+              {/* Resumen de Montura y Desglose Financiero */}
+              <div className="bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 p-4 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-white/10">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-white dark:bg-black/40 rounded-xl border border-slate-200 dark:border-white/10">
+                      {skuSeleccionado === 'EPP-TITAN-001' && <TitanioProIcon size={28} className="text-amaru-copper" />}
+                      {skuSeleccionado === 'BOUT-ACET-002' && <AcetatoLumiereIcon size={28} className="text-amaru-copper" />}
+                      {skuSeleccionado === 'FLEX-STEEL-003' && <UltralightFlexIcon size={28} className="text-amaru-copper" />}
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                        {armazonActualInfo?.nombre || skuSeleccionado}
+                      </h4>
+                      <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                        Sucursal: <strong>{sucursalActiva}</strong> (Disponible: {armazonActualInfo?.stock[sucursalActiva] || 0} un.)
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    <span className="text-base font-black text-slate-900 dark:text-white">
+                      ${Number(montoTotal).toLocaleString('es-CL')}
+                    </span>
+                    <span className="text-[10px] text-slate-400 uppercase block font-bold">
+                      Valor Base
+                    </span>
+                  </div>
+                </div>
+
+                {/* Desglose Convenio Institucional si aplica */}
+                {tipoUsuario === 'Convenio' && codigoConvenio && (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs flex items-center justify-between">
+                    <div>
+                      <span className="font-bold text-amber-900 dark:text-amber-200 block">
+                        Convenio Activo: {codigoConvenio}
+                      </span>
+                      <span className="text-[11px] text-slate-600 dark:text-zinc-400">
+                        {calcularBeneficioConvenio(codigoConvenio, Number(montoTotal)).detalleTexto}
+                      </span>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-md font-mono font-bold text-[10px] bg-amber-500/20 text-amber-900 dark:text-amber-200 uppercase">
+                      Candado 30 días al emitir
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Selector de Medio de Pago Tributario (Arqueo de Caja) */}
+              <div className="space-y-3">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-zinc-300">
+                  Medio de Pago Tributario (Arqueo de Caja) <span className="text-amaru-copper">*</span>
                 </label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {[
+                    {
+                      id: 'TRANSBANK' as const,
+                      label: '💳 Transbank POS (Débito/Crédito)',
+                      desc: 'Voucher electrónico conciliado en terminal físico',
+                    },
+                    {
+                      id: 'EFECTIVO' as const,
+                      label: '💵 Efectivo en Caja Sucursal',
+                      desc: 'Pago físico con rendición en arqueo diario',
+                    },
+                    {
+                      id: 'PLANILLA_SINDICATO' as const,
+                      label: '🏛️ Orden de Compra / Planilla',
+                      desc: 'Descuento por planilla sindicato/bienestar (Tipo B)',
+                      disabled: tipoUsuario !== 'Convenio',
+                    },
+                    {
+                      id: 'BONO_ISAPRE' as const,
+                      label: '🏥 Bono Fonasa MLE / I-Med + Copago',
+                      desc: 'Bono electrónico de salud acreditado en mesón',
+                    },
+                  ].map((mp) => {
+                    const isSelected = medioPagoTributario === mp.id;
+                    return (
+                      <div
+                        key={mp.id}
+                        onClick={() => {
+                          if (mp.disabled) return;
+                          setMedioPagoTributario(mp.id);
+                          if (mp.id === 'PLANILLA_SINDICATO') {
+                            setModalidadPago('Planilla');
+                            setDocumentoTributarioSII('GUIA_FACTURA_COLECTIVO');
+                          } else {
+                            setModalidadPago('Total');
+                          }
+                        }}
+                        className={`p-3.5 rounded-2xl border transition-all ${
+                          mp.disabled
+                            ? 'opacity-40 cursor-not-allowed bg-slate-100 dark:bg-zinc-900 border-slate-200 dark:border-white/5'
+                            : isSelected
+                            ? 'border-amaru-copper bg-amaru-copper/10 ring-2 ring-amaru-copper/30 cursor-pointer shadow-xs'
+                            : 'border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20 hover:border-slate-300 cursor-pointer'
+                        }`}
+                      >
+                        <span className="font-bold text-xs text-slate-900 dark:text-white block mb-0.5">
+                          {mp.label}
+                        </span>
+                        <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                          {mp.desc}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Campos dinámicos según Medio de Pago */}
+                {medioPagoTributario === 'TRANSBANK' && (
+                  <div className="p-3.5 rounded-2xl bg-sky-500/10 border border-sky-500/30 space-y-1.5 animate-in fade-in">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-sky-900 dark:text-sky-200 block">
+                      N° de Operación / Código Voucher POS *
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: OP-889123 / VOUCHER 4321"
+                      value={voucherTransbank}
+                      onChange={(e) => setVoucherTransbank(e.target.value.toUpperCase())}
+                      className="w-full bg-white dark:bg-[#1E1C1A] border border-sky-300 dark:border-sky-800 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900 dark:text-white uppercase outline-hidden focus:ring-2 focus:ring-sky-500"
+                    />
+                  </div>
+                )}
+
+                {medioPagoTributario === 'BONO_ISAPRE' && (
+                  <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 space-y-1.5 animate-in fade-in">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-emerald-900 dark:text-emerald-200 block">
+                      N° de Bono Fonasa MLE o Folio I-Med *
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: BONO-771239 / IMED-9001"
+                      value={folioBonoIsapre}
+                      onChange={(e) => setFolioBonoIsapre(e.target.value.toUpperCase())}
+                      className="w-full bg-white dark:bg-[#1E1C1A] border border-emerald-300 dark:border-emerald-800 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900 dark:text-white uppercase outline-hidden focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Selector de Documento Tributario SII */}
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-zinc-300">
+                  Documento Tributario SII Obligatorio <span className="text-amaru-copper">*</span>
+                </label>
+                <div className="grid grid-cols-2 gap-3">
                   <div
-                    onClick={() => setModalidadPago('Planilla')}
-                    className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
-                      modalidadPago === 'Planilla'
-                        ? 'border-amaru-copper bg-amaru-copper/10 ring-2 ring-amaru-copper/30'
-                        : 'border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20'
+                    onClick={() => setDocumentoTributarioSII('BOLETA_SII')}
+                    className={`p-3 rounded-2xl border cursor-pointer transition-all ${
+                      documentoTributarioSII === 'BOLETA_SII'
+                        ? 'border-amaru-copper bg-amaru-copper/10 ring-2 ring-amaru-copper/25 font-bold text-slate-900 dark:text-white'
+                        : 'border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20 text-slate-600 dark:text-zinc-400'
                     }`}
                   >
-                    <span className="font-bold text-xs text-slate-900 dark:text-white block mb-1">
-                      Descuento Planilla
-                    </span>
-                    <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-                      En 1 a 4 cuotas mensuales sin interés para convenios.
-                    </p>
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <Receipt size={14} className="text-amaru-copper" />
+                      <span>🧾 Boleta Electrónica SII</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 block mt-0.5">Venta Mesón / Paciente Particular</span>
                   </div>
 
                   <div
-                    onClick={() => setModalidadPago('Abono50')}
-                    className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
-                      modalidadPago === 'Abono50'
-                        ? 'border-amaru-copper bg-amaru-copper/10 ring-2 ring-amaru-copper/30'
-                        : 'border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20'
+                    onClick={() => setDocumentoTributarioSII('GUIA_FACTURA_COLECTIVO')}
+                    className={`p-3 rounded-2xl border cursor-pointer transition-all ${
+                      documentoTributarioSII === 'GUIA_FACTURA_COLECTIVO'
+                        ? 'border-amaru-copper bg-amaru-copper/10 ring-2 ring-amaru-copper/25 font-bold text-slate-900 dark:text-white'
+                        : 'border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20 text-slate-600 dark:text-zinc-400'
                     }`}
                   >
-                    <span className="font-bold text-xs text-slate-900 dark:text-white block mb-1">
-                      Abono 50% Mesón
-                    </span>
-                    <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-                      50% hoy (${Math.round(Number(montoTotal) * 0.5).toLocaleString('es-CL')}) y 50% al entregar.
-                    </p>
-                  </div>
-
-                  <div
-                    onClick={() => setModalidadPago('Total')}
-                    className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
-                      modalidadPago === 'Total'
-                        ? 'border-amaru-copper bg-amaru-copper/10 ring-2 ring-amaru-copper/30'
-                        : 'border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20'
-                    }`}
-                  >
-                    <span className="font-bold text-xs text-slate-900 dark:text-white block mb-1">
-                      Pago Total en Tienda
-                    </span>
-                    <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-                      Webpay Plus, Tarjeta de Débito/Crédito o Efectivo.
-                    </p>
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <FileSpreadsheet size={14} className="text-amaru-copper" />
+                      <span>📑 Factura / Guía Convenio</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 block mt-0.5">Despacho Colectivo por Planilla</span>
                   </div>
                 </div>
               </div>
 
-              {/* Si es Planilla: Cuotas y Titular */}
-              {modalidadPago === 'Planilla' && (
+              {/* Si es Planilla / Descuento Sindicato: Cuotas y Titular */}
+              {(modalidadPago === 'Planilla' || medioPagoTributario === 'PLANILLA_SINDICATO') && (
                 <div className="space-y-4 pt-1 animate-in fade-in duration-150">
                   {/* Selector de Cuotas (1 a 4) */}
                   <div>

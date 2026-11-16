@@ -33,7 +33,7 @@ import {
   PackageCheck,
 } from 'lucide-react';
 import { formatearRUT } from '../utils/rut';
-import { getUserInfo, isUserPatient, isUserOperator, isUserAdmin } from '../utils/auth';
+import { getUserInfo, isUserPatient, isUserOperator, isUserAdmin, isUserAuditor } from '../utils/auth';
 import { AutoRecetaModal } from '../components/AutoRecetaModal';
 import { WhatsAppIcon } from '../components/icons/WhatsAppIcon';
 import { getSucursalActiva, registrarIngresoStock } from '../services/inventarioService';
@@ -51,6 +51,7 @@ import {
   type SolicitudReceta,
   type CiudadAtencion,
 } from '../services/recetasService';
+import { desbloquearCodigoPorAnulacion } from '../services/convenioSindicatoService';
 
 // ── Control Administrativo & Auditoría de Rectificaciones / Anulaciones ───────
 
@@ -425,6 +426,7 @@ export const SeguimientoCompraView: React.FC = () => {
   const esPaciente = isUserPatient();
   const esOperador = isUserOperator();
   const esAdmin = isUserAdmin();
+  const esAuditor = isUserAuditor();
   const [sucursalActiva, setSucursalActivaState] = useState<'Calama' | 'Antofagasta'>(() => getSucursalActiva());
 
   const [llegadasAcreditadas, setLlegadasAcreditadas] = useState<Record<string, boolean>>(() => {
@@ -732,7 +734,15 @@ export const SeguimientoCompraView: React.FC = () => {
       sucursal: sucursalTarget,
     });
 
-    setToastMensaje(`✓ Compra anulada. Se reversó la venta y se devolvió +1 unidad al stock de Sucursal ${sucursalTarget}.`);
+    // FASE 2: Desbloqueo inmediato del candado de 30 días para convenios institucionales
+    desbloquearCodigoPorAnulacion(
+      pedidoActual.folio,
+      pedidoActual.rutTitular,
+      'María González (Administradora)',
+      formMotivoAnulacion
+    );
+
+    setToastMensaje(`✓ Compra anulada. Se reversó la venta, se liberó el beneficio del convenio y se devolvió +1 unidad al stock de Sucursal ${sucursalTarget}.`);
     setTimeout(() => setToastMensaje(null), 5000);
   };
 
@@ -2408,14 +2418,21 @@ export const SeguimientoCompraView: React.FC = () => {
                         </div>
                       ) : paso3EnTransito ? (
                         <div className="mt-4 pt-2">
-                          <button
-                            type="button"
-                            onClick={() => handleAcreditarLlegada(pedidoActual.folio)}
-                            className="w-full py-2 px-3 text-xs font-bold rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-95 text-white flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer"
-                          >
-                            <PackageCheck size={14} />
-                            <span>Acreditar Llegada a Tienda</span>
-                          </button>
+                          {!esAuditor ? (
+                            <button
+                              type="button"
+                              onClick={() => handleAcreditarLlegada(pedidoActual.folio)}
+                              className="w-full py-2 px-3 text-xs font-bold rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-95 text-white flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                            >
+                              <PackageCheck size={14} />
+                              <span>Acreditar Llegada a Tienda</span>
+                            </button>
+                          ) : (
+                            <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-black/30 border border-slate-200 dark:border-white/10 text-center text-[10px] font-mono text-slate-500 dark:text-zinc-400 font-semibold flex items-center justify-center gap-1.5 select-none">
+                              <Lock size={12} className="text-slate-400" />
+                              <span>En Tránsito a Sucursal (SoD Solo Lectura)</span>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <div className="mt-4 pt-3 border-t border-slate-200 dark:border-white/5 flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-zinc-400">
@@ -2470,14 +2487,21 @@ export const SeguimientoCompraView: React.FC = () => {
                         </div>
                       ) : (
                         <div className="mt-4 pt-2">
-                          <button
-                            type="button"
-                            onClick={() => handleIrAEntregar(pedidoActual.folio)}
-                            className="w-full py-2 px-3 text-xs font-bold rounded-xl bg-gradient-to-r from-amaru-copper to-amaru-earth hover:brightness-105 active:scale-95 text-white flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer"
-                          >
-                            <span>Ir a Entregar Pedido</span>
-                            <ArrowRight size={14} />
-                          </button>
+                          {!esAuditor ? (
+                            <button
+                              type="button"
+                              onClick={() => handleIrAEntregar(pedidoActual.folio)}
+                              className="w-full py-2 px-3 text-xs font-bold rounded-xl bg-gradient-to-r from-amaru-copper to-amaru-earth hover:brightness-105 active:scale-95 text-white flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                            >
+                              <span>Ir a Entregar Pedido</span>
+                              <ArrowRight size={14} />
+                            </button>
+                          ) : (
+                            <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-black/30 border border-slate-200 dark:border-white/10 text-center text-[10px] font-mono text-slate-500 dark:text-zinc-400 font-semibold flex items-center justify-center gap-1.5 select-none">
+                              <Lock size={12} className="text-slate-400" />
+                              <span>Listo para Retiro (SoD Solo Lectura)</span>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -2555,7 +2579,7 @@ export const SeguimientoCompraView: React.FC = () => {
                         {/* Detalles adicionales específicos por hito */}
 
                         {/* Sello SHA-256 en Entrega DS 594: Terminal Forense Oscura (Exclusivo AUDITOR) */}
-                        {hito.selloSha256 && userInfo.rol === 'AUDITOR' && (
+                        {hito.selloSha256 && (esAuditor || userInfo.rol === 'AUDITOR') && (
                           <div className="mt-3 bg-zinc-950 border border-emerald-500/30 rounded-xl p-3.5 space-y-2.5 shadow-lg shadow-black/40">
                             {/* Terminal prompt header */}
                             <div className="flex items-center justify-between border-b border-emerald-500/20 pb-2">

@@ -21,6 +21,13 @@ export interface SolicitudReceta {
   oiEsfera?: string;
   oiCilindro?: string;
   oiEje?: string;
+  dpMm?: string;
+  rutMedico?: string;
+  nombreMedico?: string;
+  centroSalud?: string;
+  fechaEmisionReceta?: string;
+  hashArchivoReceta?: string;
+  estadoRnpi?: 'RNPI_HABILITADO' | 'PENDIENTE_MESON' | 'RUT_INVALIDO' | 'NO_APLICA';
   armazon: string;
   monto: number;
   modalidadPago: string;
@@ -30,6 +37,10 @@ export interface SolicitudReceta {
   origen?: 'PORTAL_PACIENTE' | 'QR_PUBLICO' | 'MESON' | string;
   tipoSolicitud?: string;
   consentimientoLey21719?: boolean;
+  consentimientoMinsal?: boolean;
+  declaracionAntifraude?: boolean;
+  codigoConvenio?: string;
+  contactoVerificado?: boolean;
 }
 
 export const SOLICITUD_DEMO_INICIAL: SolicitudReceta = {
@@ -121,6 +132,24 @@ export function cambiarEstadoSolicitud(
     }
     return s;
   });
+  guardarSolicitudesRecetas(actualizadas);
+}
+
+export function marcarContactoVerificado(folioOId: string): void {
+  const solicitudes = getSolicitudesRecetas();
+  const target = folioOId.trim().toUpperCase();
+  const actualizadas = solicitudes.map((s) => {
+    if (s.folio.toUpperCase() === target || s.id.toUpperCase() === target) {
+      return { ...s, contactoVerificado: true };
+    }
+    return s;
+  });
+  guardarSolicitudesRecetas(actualizadas);
+}
+
+export function descartarSolicitudReceta(id: string): void {
+  const solicitudes = getSolicitudesRecetas();
+  const actualizadas = solicitudes.filter((s) => s.id !== id);
   guardarSolicitudesRecetas(actualizadas);
 }
 

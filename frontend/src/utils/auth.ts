@@ -91,6 +91,11 @@ export function isUserOperator(): boolean {
   return rol === 'OPERADOR';
 }
 
+export function isUserAuditor(): boolean {
+  const { rol } = getUserInfo();
+  return rol === 'AUDITOR';
+}
+
 export function getUserInfo(): { username: string; rut: string; is_staff: boolean; rol: string } {
   const token = localStorage.getItem('amaru_access_token');
   const payload = token ? decodeJwtPayload(token) : null;

@@ -33,8 +33,8 @@ export const ReservaHoraWidget: React.FC<ReservaHoraWidgetProps> = ({
   })();
 
   const [fecha, setFecha] = useState(tomorrowStr);
-  const [bloque, setBloque] = useState<'Mañana (09:00 - 12:00)' | 'Tarde (14:00 - 17:00)'>(
-    'Mañana (09:00 - 12:00)'
+  const [bloque, setBloque] = useState<'Mañana (09:00 - 13:00 hrs)' | 'Tarde (15:00 - 19:30 hrs)'>(
+    'Mañana (09:00 - 13:00 hrs)'
   );
   const [cargando, setCargando] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -62,7 +62,7 @@ export const ReservaHoraWidget: React.FC<ReservaHoraWidgetProps> = ({
     setErrorMsg(null);
 
     // Mapeo horario a timestamp ISO para la API de Django
-    const horaString = bloque.startsWith('Mañana') ? '09:00:00' : '14:00:00';
+    const horaString = bloque.startsWith('Mañana') ? '09:00:00' : '15:00:00';
     const fechaHoraIso = `${fecha}T${horaString}`;
     const rutLimpio = formatearRUT(rutPaciente);
 
@@ -161,12 +161,12 @@ export const ReservaHoraWidget: React.FC<ReservaHoraWidgetProps> = ({
               <select
                 value={bloque}
                 onChange={(e) =>
-                  setBloque(e.target.value as 'Mañana (09:00 - 12:00)' | 'Tarde (14:00 - 17:00)')
+                  setBloque(e.target.value as 'Mañana (09:00 - 13:00 hrs)' | 'Tarde (15:00 - 19:30 hrs)')
                 }
-                className="w-full bg-slate-50 dark:bg-[#1A1816] border border-slate-300 dark:border-slate-600 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-[#B34B0C] outline-none transition-all cursor-pointer"
+                className="w-full bg-slate-50 dark:bg-[#1A1816] border border-slate-300 dark:border-slate-600 rounded-xl px-3 py-2.5 text-xs sm:text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-[#B34B0C] outline-none transition-all cursor-pointer font-medium"
               >
-                <option value="Mañana (09:00 - 12:00)">Mañana (09:00 - 12:00)</option>
-                <option value="Tarde (14:00 - 17:00)">Tarde (14:00 - 17:00)</option>
+                <option value="Mañana (09:00 - 13:00 hrs)">Mañana (09:00 - 13:00 hrs)</option>
+                <option value="Tarde (15:00 - 19:30 hrs)">Tarde (15:00 - 19:30 hrs)</option>
               </select>
             </div>
           </div>
