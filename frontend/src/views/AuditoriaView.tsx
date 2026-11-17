@@ -229,13 +229,13 @@ export const AuditoriaView: React.FC = () => {
               dondeSucursal: (item.sucursal as 'Calama' | 'Antofagasta') || 'Calama',
               dondeIp: item.sucursal === 'Antofagasta' ? '192.168.20.12' : '192.168.10.45',
               dondeTerminal: item.sucursal === 'Antofagasta' ? 'POS-ANTOF-02' : 'POS-CAL-01',
-              eventoTipo: esAnulacion ? 'ANULACIÓN DE VENTA' : 'RECTIFICACIÓN CLÍNICA',
-              detalleAntes: esAnulacion
+              eventoTipo: item.eventoTipo || (esAnulacion ? 'ANULACIÓN DE VENTA' : 'RECTIFICACIÓN CLÍNICA'),
+              detalleAntes: item.detalleAntes || (esAnulacion
                 ? `Folio #${item.folio || '8F1085AD'}: ACTIVO (Monto: $185.000 · Venta en Mesón)`
-                : `Folio #${item.folio || '8F1085AD'} · Parámetros Clínicos v1 (Protegido Ley 20.584)`,
-              detalleDespues: esAnulacion
+                : `Folio #${item.folio || '8F1085AD'} · Parámetros Clínicos v1 (Protegido Ley 20.584)`),
+              detalleDespues: item.detalleDespues || (esAnulacion
                 ? `Folio #${item.folio || '8F1085AD'}: ANULADO / REVERSADO · Motivo: ${item.motivo || item.detalles || 'Reversión'} (+1 devuelto a stock)`
-                : `Folio #${item.folio || '8F1085AD'} · Rectificación Clínica Autorizada v2 (Respaldo MINSAL Verificado · Dato Sensible Enmascarado)`,
+                : `Folio #${item.folio || '8F1085AD'} · Rectificación Clínica Autorizada v2 (Respaldo MINSAL Verificado · Dato Sensible Enmascarado)`),
               selloSha256: `sha256_${(item.id || 'hash').slice(0, 10)}_${Date.now().toString(16)}`,
             });
           });

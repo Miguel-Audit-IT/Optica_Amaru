@@ -58,6 +58,7 @@ import { desbloquearCodigoPorAnulacion } from '../services/convenioSindicatoServ
 export interface RegistroControlAdmin {
   id: string;
   tipo: 'RECTIFICACION' | 'ANULACION';
+  eventoTipo?: string;
   folio: string;
   paciente: string;
   rut: string;
@@ -65,6 +66,8 @@ export interface RegistroControlAdmin {
   responsable: string;
   motivo: string;
   detalles?: string;
+  detalleAntes?: string;
+  detalleDespues?: string;
   sucursal?: string;
 }
 
@@ -635,6 +638,7 @@ export const SeguimientoCompraView: React.FC = () => {
 
   // Campos para Modal de Anulación
   const [formMotivoAnulacion, setFormMotivoAnulacion] = useState<string>('Desistimiento del cliente');
+  const [detalleMotivoAnulacion, setDetalleMotivoAnulacion] = useState<string>('');
   const [anulandoEnProceso, setAnulandoEnProceso] = useState<boolean>(false);
 
   const abrirModalCorregir = () => {
@@ -680,6 +684,7 @@ export const SeguimientoCompraView: React.FC = () => {
     guardarRegistroControlAdmin({
       id: `REG-${Date.now()}`,
       tipo: 'RECTIFICACION',
+      eventoTipo: 'RECTIFICACIÓN CLÍNICA',
       folio: pedidoActual.folio,
       paciente: pedidoActual.nombreTitular,
       rut: pedidoActual.rutTitular,
@@ -687,6 +692,8 @@ export const SeguimientoCompraView: React.FC = () => {
       responsable: 'María González (Administradora)',
       motivo: formMotivoCorreccion,
       detalles: `OD: ${formOdEsfera}/${formOdCilindro}/${formOdEje} | OI: ${formOiEsfera}/${formOiCilindro}/${formOiEje} | DP: ${formDpMm} | Sucursal: ${formSucursal}`,
+      detalleAntes: `Folio #${pedidoActual.folio} · Receta Anterior OD: ${pedidoActual.odEsfera || 'N/A'}/${pedidoActual.odCilindro || 'N/A'} OI: ${pedidoActual.oiEsfera || 'N/A'}`,
+      detalleDespues: `Folio #${pedidoActual.folio} · Rectificación Autorizada OD: ${formOdEsfera}/${formOdCilindro} OI: ${formOiEsfera}/${formOiCilindro} · Motivo: ${formMotivoCorreccion}`,
       sucursal: formSucursal,
     });
 
@@ -698,8 +705,11 @@ export const SeguimientoCompraView: React.FC = () => {
     if (!pedidoActual) return;
     setAnulandoEnProceso(true);
     const ahora = new Date().toLocaleString('es-CL');
+    const motivoFinal = detalleMotivoAnulacion.trim()
+      ? `${formMotivoAnulacion}: ${detalleMotivoAnulacion.trim()}`
+      : formMotivoAnulacion;
     const sucursalTarget = (pedidoActual.sucursalRetiro as 'Calama' | 'Antofagasta') || sucursalActiva || 'Calama';
-    const sello = `🚫 Anulado por María González (Administradora) · ${ahora} — Motivo: ${formMotivoAnulacion} (+1 unidad devuelta al stock de ${sucursalTarget})`;
+    const sello = `🚫 Anulado por María González (Administradora) · ${ahora} — Motivo: ${motivoFinal} (+1 unidad devuelta al stock de ${sucursalTarget})`;
 
     registrarIngresoStock(
       'EPP-TITAN-001',
@@ -713,7 +723,7 @@ export const SeguimientoCompraView: React.FC = () => {
       ...pedidoActual,
       estadoBadge: 'ANULADO / REVERSADO',
       esAnulado: true,
-      motivoAnulacion: formMotivoAnulacion,
+      motivoAnulacion: motivoFinal,
       selloRectificacion: sello,
     };
 
@@ -724,13 +734,16 @@ export const SeguimientoCompraView: React.FC = () => {
     guardarRegistroControlAdmin({
       id: `REG-${Date.now()}`,
       tipo: 'ANULACION',
+      eventoTipo: 'ANULACIÓN DE VENTA',
       folio: pedidoActual.folio,
       paciente: pedidoActual.nombreTitular,
       rut: pedidoActual.rutTitular,
       fechaHoraExacta: ahora,
       responsable: 'María González (Administradora)',
-      motivo: formMotivoAnulacion,
+      motivo: motivoFinal,
       detalles: `+1 unidad reintegrada al inventario de ${sucursalTarget}`,
+      detalleAntes: `Folio #${pedidoActual.folio}: ACTIVO (Monto: $${(pedidoActual.saldoTotal || 0).toLocaleString('es-CL')} CLP)`,
+      detalleDespues: `Folio #${pedidoActual.folio}: ANULADO / REVERSADO · Motivo: ${motivoFinal} (+1 devuelto a ${sucursalTarget})`,
       sucursal: sucursalTarget,
     });
 
@@ -739,7 +752,7 @@ export const SeguimientoCompraView: React.FC = () => {
       pedidoActual.folio,
       pedidoActual.rutTitular,
       'María González (Administradora)',
-      formMotivoAnulacion
+      motivoFinal
     );
 
     setToastMensaje(`✓ Compra anulada. Se reversó la venta, se liberó el beneficio del convenio y se devolvió +1 unidad al stock de Sucursal ${sucursalTarget}.`);
@@ -1997,7 +2010,7 @@ export const SeguimientoCompraView: React.FC = () => {
               )}
 
               {/* ── Barra Exclusiva de Control Administrativo (Solo ADMINISTRADOR) ── */}
-              {esAdmin && (
+              {esAdmin && !pedidoActual.esAnulado && (
                 <div className="mt-5 pt-4 border-t border-amber-500/25 bg-amber-500/[0.04] dark:bg-amber-950/20 rounded-2xl p-4 border border-amber-500/30 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-xs">
                   <div className="flex items-center gap-2.5">
                     <span className="p-2 rounded-xl bg-amber-500/15 text-amber-700 dark:text-amber-300 font-bold text-xs">
@@ -2020,7 +2033,7 @@ export const SeguimientoCompraView: React.FC = () => {
                       className="px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 active:scale-95 text-white shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
                     >
                       <Edit3 size={13} />
-                      <span>✏️ Corregir Mediciones / Pedido</span>
+                      <span>✏️ Corregir Receta</span>
                     </button>
 
                     <button
@@ -2029,7 +2042,7 @@ export const SeguimientoCompraView: React.FC = () => {
                       className="px-3.5 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 active:scale-95 text-white shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
                     >
                       <AlertTriangle size={13} />
-                      <span>🚫 Anular Compra / Devolver Stock</span>
+                      <span>🚫 Anular Venta</span>
                     </button>
                   </div>
                 </div>
@@ -3111,7 +3124,15 @@ export const SeguimientoCompraView: React.FC = () => {
                   <option value="Desistimiento del cliente">Desistimiento del cliente</option>
                   <option value="Error de cobro/duplicidad">Error de cobro/duplicidad</option>
                   <option value="Rechazo de cobertura convenio">Rechazo de cobertura convenio</option>
+                  <option value="Devolución por insatisfacción técnica">Devolución por insatisfacción técnica</option>
                 </select>
+                <input
+                  type="text"
+                  placeholder="Detalle o justificación adicional de auditoría..."
+                  value={detalleMotivoAnulacion}
+                  onChange={(e) => setDetalleMotivoAnulacion(e.target.value)}
+                  className="w-full mt-2 p-2.5 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-xl text-xs placeholder-slate-400 focus:outline-hidden focus:ring-1 focus:ring-rose-500"
+                />
               </div>
 
               <div className="p-3 bg-slate-50 dark:bg-zinc-900 rounded-xl border border-slate-200/60 dark:border-zinc-800 text-[11px] space-y-1">

@@ -13,12 +13,17 @@ import {
   TrendingUp,
   Clock,
   BookOpen,
+  Settings,
+  MinusCircle,
+  DollarSign,
 } from 'lucide-react';
 import {
   getInventario,
   getSucursalActiva,
   setSucursalActiva,
   registrarIngresoStock,
+  descontarStock,
+  guardarInventario,
   type ItemInventario,
 } from '../services/inventarioService';
 import { getUserInfo, isUserAdmin, isUserAuditor } from '../utils/auth';
@@ -121,6 +126,22 @@ export const InventarioView: React.FC = () => {
   const [errorModal, setErrorModal] = useState<string>('');
   const [toastMensaje, setToastMensaje] = useState<string | null>(null);
 
+  // ── Estados para Modal Gerencial de Ajuste de Precio y Mermas (Exclusivo Administradora) ──
+  const [modalGerencialAbierto, setModalGerencialAbierto] = useState(false);
+  const [itemGerencial, setItemGerencial] = useState<ItemInventario | null>(null);
+  const [tabGerencial, setTabGerencial] = useState<'PRECIO' | 'MERMA'>('PRECIO');
+
+  // Estado Tab 1: Cambio de Precio
+  const [nuevoPrecioVenta, setNuevoPrecioVenta] = useState<number>(0);
+  const [motivoPrecio, setMotivoPrecio] = useState<string>('');
+
+  // Estado Tab 2: Merma / Ajuste de Stock (solo resta)
+  const [sucursalMerma, setSucursalMerma] = useState<'Calama' | 'Antofagasta'>('Calama');
+  const [cantidadMerma, setCantidadMerma] = useState<number>(1);
+  const [tipoMerma, setTipoMerma] = useState<'Rotura en Taller' | 'Garantía Clínica' | 'Traspaso a Sucursal'>('Rotura en Taller');
+  const [motivoMerma, setMotivoMerma] = useState<string>('');
+  const [errorGerencial, setErrorGerencial] = useState<string>('');
+
   const refrescarInventario = () => {
     setInventario(getInventario());
     setSucursalActual(getSucursalActiva());
@@ -186,6 +207,169 @@ export const InventarioView: React.FC = () => {
     } else {
       setErrorModal('Error al registrar el ingreso de stock.');
     }
+  };
+
+  // ── Handlers de Excepciones Gerenciales (Administradora) ──
+  const handleAbrirModalGerencial = (item: ItemInventario) => {
+    setItemGerencial(item);
+    setNuevoPrecioVenta(item.precioClp);
+    setMotivoPrecio('');
+    setSucursalMerma(sucursalActual);
+    setCantidadMerma(1);
+    setTipoMerma('Rotura en Taller');
+    setMotivoMerma('');
+    setErrorGerencial('');
+    setTabGerencial('PRECIO');
+    setModalGerencialAbierto(true);
+  };
+
+  const handleGuardarNuevoPrecio = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!itemGerencial) return;
+    if (!motivoPrecio.trim()) {
+      setErrorGerencial('Debe ingresar un motivo obligatorio para el ajuste de precio (ej. Ajuste IPC, Promoción, Corrección).');
+      return;
+    }
+    if (nuevoPrecioVenta <= 0) {
+      setErrorGerencial('El nuevo precio de venta debe ser superior a $0 CLP.');
+      return;
+    }
+
+    const precioAnterior = itemGerencial.precioClp;
+    const actual = getInventario();
+    const actualizado = actual.map((it) => {
+      if (it.sku === itemGerencial.sku) {
+        return { ...it, precioClp: nuevoPrecioVenta };
+      }
+      return it;
+    });
+    guardarInventario(actualizado);
+
+    // Registro de auditoría WORM
+    const ahora = new Date().toLocaleString('es-CL');
+    try {
+      const raw = localStorage.getItem('amaru_anulaciones_rectificaciones');
+      const auditLog = raw ? JSON.parse(raw) : [];
+      auditLog.unshift({
+        id: `PRECIO-${Date.now()}`,
+        tipo: 'CAMBIO_PRECIO',
+        eventoTipo: 'AJUSTE DE PRECIO GERENCIAL',
+        folio: `SKU-${itemGerencial.sku}`,
+        paciente: 'Control de Catálogo',
+        rut: '14.289.432-1',
+        fechaHoraExacta: ahora,
+        responsable: 'María González (Administradora)',
+        sucursal: sucursalActual,
+        motivo: motivoPrecio.trim(),
+        detalleAntes: `SKU ${itemGerencial.sku} (${itemGerencial.nombre}) · Precio Anterior: $${precioAnterior.toLocaleString('es-CL')} CLP`,
+        detalleDespues: `SKU ${itemGerencial.sku} (${itemGerencial.nombre}) · Nuevo Precio: $${nuevoPrecioVenta.toLocaleString('es-CL')} CLP · Motivo: ${motivoPrecio.trim()}`,
+      });
+      localStorage.setItem('amaru_anulaciones_rectificaciones', JSON.stringify(auditLog));
+      window.dispatchEvent(new Event('amaru_anulaciones_updated'));
+    } catch {
+      // ignore
+    }
+
+    // Registro en Kardex
+    try {
+      const rawKardex = localStorage.getItem('amaru_movimientos_stock');
+      const kardex = rawKardex ? JSON.parse(rawKardex) : [];
+      kardex.unshift({
+        fechaHoraExacta: ahora,
+        responsable: 'María González (Administradora)',
+        tipo: 'Ajuste Precio',
+        guia: `MOD-P-${itemGerencial.sku.slice(0, 8)}`,
+        descripcion: `Cambio de Precio: $${precioAnterior.toLocaleString('es-CL')} ➔ $${nuevoPrecioVenta.toLocaleString('es-CL')} CLP (${motivoPrecio.trim()})`,
+        sucursal: sucursalActual,
+        modelo: itemGerencial.nombre,
+        sku: itemGerencial.sku,
+        cantidad: 0,
+      });
+      localStorage.setItem('amaru_movimientos_stock', JSON.stringify(kardex));
+      window.dispatchEvent(new Event('amaru_stock_updated'));
+    } catch {
+      // ignore
+    }
+
+    refrescarInventario();
+    setModalGerencialAbierto(false);
+    setToastMensaje(`✓ Precio de "${itemGerencial.nombre}" actualizado a $${nuevoPrecioVenta.toLocaleString('es-CL')} CLP.`);
+    setTimeout(() => setToastMensaje(null), 5000);
+  };
+
+  const handleGuardarMermaStock = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!itemGerencial) return;
+    if (!motivoMerma.trim()) {
+      setErrorGerencial('Debe indicar un motivo detallado para el registro de merma o baja.');
+      return;
+    }
+    if (cantidadMerma <= 0) {
+      setErrorGerencial('La cantidad a descontar debe ser mayor a 0.');
+      return;
+    }
+    const stockDisponible = itemGerencial.stock[sucursalMerma] || 0;
+    if (cantidadMerma > stockDisponible) {
+      setErrorGerencial(`Stock insuficiente en ${sucursalMerma} (${stockDisponible} disponibles). No es posible descontar ${cantidadMerma} unidades.`);
+      return;
+    }
+
+    const res = descontarStock(itemGerencial.sku, sucursalMerma, cantidadMerma);
+    if (!res.exito) {
+      setErrorGerencial('Error al descontar stock de bodega.');
+      return;
+    }
+
+    const ahora = new Date().toLocaleString('es-CL');
+    // Auditoría WORM
+    try {
+      const raw = localStorage.getItem('amaru_anulaciones_rectificaciones');
+      const auditLog = raw ? JSON.parse(raw) : [];
+      auditLog.unshift({
+        id: `MERMA-${Date.now()}`,
+        tipo: 'AJUSTE_MERMA',
+        eventoTipo: 'MERMA / AJUSTE DE BODEGA',
+        folio: `MERMA-${itemGerencial.sku.slice(0, 6)}`,
+        paciente: 'Control de Bodega',
+        rut: '14.289.432-1',
+        fechaHoraExacta: ahora,
+        responsable: 'María González (Administradora)',
+        sucursal: sucursalMerma,
+        motivo: `${tipoMerma}: ${motivoMerma.trim()}`,
+        detalleAntes: `Stock en ${sucursalMerma}: ${stockDisponible} uds (${itemGerencial.nombre} · ${itemGerencial.sku})`,
+        detalleDespues: `Stock en ${sucursalMerma}: ${stockDisponible - cantidadMerma} uds (-${cantidadMerma} uds por ${tipoMerma} · ${motivoMerma.trim()})`,
+      });
+      localStorage.setItem('amaru_anulaciones_rectificaciones', JSON.stringify(auditLog));
+      window.dispatchEvent(new Event('amaru_anulaciones_updated'));
+    } catch {
+      // ignore
+    }
+
+    // Kardex
+    try {
+      const rawKardex = localStorage.getItem('amaru_movimientos_stock');
+      const kardex = rawKardex ? JSON.parse(rawKardex) : [];
+      kardex.unshift({
+        fechaHoraExacta: ahora,
+        responsable: 'María González (Administradora)',
+        tipo: 'Merma / Salida',
+        guia: `MERMA-${Date.now().toString().slice(-6)}`,
+        descripcion: `Merma (${tipoMerma}): ${motivoMerma.trim()}`,
+        sucursal: sucursalMerma,
+        modelo: itemGerencial.nombre,
+        sku: itemGerencial.sku,
+        cantidad: -cantidadMerma,
+      });
+      localStorage.setItem('amaru_movimientos_stock', JSON.stringify(kardex));
+      window.dispatchEvent(new Event('amaru_stock_updated'));
+    } catch {
+      // ignore
+    }
+
+    refrescarInventario();
+    setModalGerencialAbierto(false);
+    setToastMensaje(`✓ Merma registrada: -${cantidadMerma} uds de "${itemGerencial.nombre}" en Sucursal ${sucursalMerma} (${tipoMerma}).`);
+    setTimeout(() => setToastMensaje(null), 5000);
   };
 
   // Filtrado de armazones
@@ -665,6 +849,18 @@ export const InventarioView: React.FC = () => {
                       <span>Iniciar Venta con este Armazón</span>
                       <ArrowRight size={13} />
                     </button>
+
+                    {/* Botón Exclusivo Administradora: Ajuste de Precio / Merma */}
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => handleAbrirModalGerencial(item)}
+                        className="w-full py-2 px-3 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer bg-slate-900 hover:bg-black text-amber-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-amber-300 border border-amber-500/30 transition-all shadow-xs hover:scale-[1.01] active:scale-95"
+                      >
+                        <Settings size={13} className="text-amber-400" />
+                        <span>⚙️ Ajuste de Precio / Merma</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -962,6 +1158,290 @@ export const InventarioView: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal Gerencial: Ajuste de Precio / Merma de Bodega (Exclusivo Administradora) ── */}
+      {modalGerencialAbierto && itemGerencial && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#1C1A18] border border-amber-500/30 rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl space-y-5 animate-in zoom-in-95 duration-150 max-h-[92vh] overflow-y-auto">
+            {/* Header del Modal */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-white/5">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 rounded-xl bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30">
+                  <Settings size={18} />
+                </span>
+                <div>
+                  <h3 className="text-base font-black tracking-tight text-slate-900 dark:text-white">
+                    Ajuste Gerencial: {itemGerencial.nombre}
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-zinc-400 font-mono">
+                    SKU: {itemGerencial.sku} · Exclusivo Administradora
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalGerencialAbierto(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-1 rounded-lg cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Pestañas: Cambio de Precio vs Registro de Merma */}
+            <div className="flex rounded-xl bg-slate-100 dark:bg-black/40 p-1 border border-slate-200/80 dark:border-white/10">
+              <button
+                type="button"
+                onClick={() => {
+                  setTabGerencial('PRECIO');
+                  setErrorGerencial('');
+                }}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  tabGerencial === 'PRECIO'
+                    ? 'bg-white dark:bg-[#2A2522] text-amber-700 dark:text-amber-400 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <DollarSign size={14} />
+                <span>1. Cambio de Precio</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTabGerencial('MERMA');
+                  setErrorGerencial('');
+                }}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  tabGerencial === 'MERMA'
+                    ? 'bg-white dark:bg-[#2A2522] text-rose-600 dark:text-rose-400 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <MinusCircle size={14} />
+                <span>2. Registro de Merma</span>
+              </button>
+            </div>
+
+            {errorGerencial && (
+              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-700 dark:text-red-300 text-xs flex items-center gap-2">
+                <AlertCircle size={15} className="shrink-0" />
+                <span>{errorGerencial}</span>
+              </div>
+            )}
+
+            {/* ── Pestaña 1: Cambio de Precio ── */}
+            {tabGerencial === 'PRECIO' && (
+              <form onSubmit={handleGuardarNuevoPrecio} className="space-y-4 text-xs">
+                {(() => {
+                  const costoProv =
+                    COSTOS_ADMIN[itemGerencial.sku]?.costo ||
+                    Math.round(itemGerencial.precioClp * 0.35);
+                  const nuevoMargenBrutoClp = nuevoPrecioVenta - costoProv;
+                  const nuevoMargenPct =
+                    nuevoPrecioVenta > 0
+                      ? Math.round((nuevoMargenBrutoClp / nuevoPrecioVenta) * 100)
+                      : 0;
+
+                  return (
+                    <>
+                      <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200/60 dark:border-white/5">
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                            Costo Proveedor (Confidencial):
+                          </span>
+                          <span className="font-mono text-sm font-extrabold text-slate-800 dark:text-zinc-200">
+                            ${costoProv.toLocaleString('es-CL')} CLP
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                            Precio Venta Actual:
+                          </span>
+                          <span className="font-mono text-sm font-extrabold text-slate-500 line-through">
+                            ${itemGerencial.precioClp.toLocaleString('es-CL')} CLP
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-zinc-300">
+                          Nuevo Precio de Venta (CLP) <span className="text-amaru-copper">*</span>
+                        </label>
+                        <input
+                          type="number"
+                          step={1000}
+                          min={10000}
+                          value={nuevoPrecioVenta}
+                          onChange={(e) => setNuevoPrecioVenta(Number(e.target.value))}
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/30 text-slate-900 dark:text-white font-mono text-sm font-black focus:outline-hidden focus:ring-2 focus:ring-amaru-copper"
+                          required
+                        />
+                      </div>
+
+                      {/* Cálculo en vivo de Margen */}
+                      <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-between">
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300 block">
+                            Nuevo Margen Bruto Proyectado:
+                          </span>
+                          <span className="font-mono text-xs text-emerald-700 dark:text-emerald-400 font-semibold">
+                            Ganancia neta: ${nuevoMargenBrutoClp.toLocaleString('es-CL')} CLP por unidad
+                          </span>
+                        </div>
+                        <span className="font-mono text-base font-black text-emerald-700 dark:text-emerald-300 bg-emerald-500/20 px-2.5 py-1 rounded-lg">
+                          +{nuevoMargenPct}%
+                        </span>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-zinc-300">
+                          Motivo del Ajuste de Precio <span className="text-amaru-copper">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Ej. Ajuste IPC anual, Promoción temporal o Reajuste de margen"
+                          value={motivoPrecio}
+                          onChange={(e) => setMotivoPrecio(e.target.value)}
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/30 text-slate-900 dark:text-white text-xs placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amaru-copper"
+                          required
+                        />
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 flex items-center justify-between text-[11px]">
+                        <span className="text-slate-500 dark:text-zinc-400">Firma de Auditoría:</span>
+                        <span className="font-bold text-amber-800 dark:text-amber-400">
+                          María González (Administradora)
+                        </span>
+                      </div>
+
+                      <div className="pt-2 flex items-center justify-end gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setModalGerencialAbierto(false)}
+                          className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-white/10 text-xs font-semibold text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md shadow-amber-600/20 active:scale-95 flex items-center gap-2"
+                        >
+                          <CheckCircle2 size={15} />
+                          <span>Actualizar Precio Oficial</span>
+                        </button>
+                      </div>
+                    </>
+                  );
+                })()}
+              </form>
+            )}
+
+            {/* ── Pestaña 2: Registro de Merma / Ajuste de Stock (Solo Resta) ── */}
+            {tabGerencial === 'MERMA' && (
+              <form onSubmit={handleGuardarMermaStock} className="space-y-4 text-xs">
+                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-900 dark:text-amber-200 text-xs space-y-1">
+                  <div className="font-bold flex items-center gap-1.5">
+                    <AlertCircle size={14} className="text-amber-600 shrink-0" />
+                    <span>Control Estricto de Bajas (Kardex Inmutable)</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed">
+                    Las altas de stock se realizan <strong>únicamente con N° de Guía de Despacho en mesón</strong>. Este módulo es exclusivo para registrar bajas por rotura, daño en biselado o traspasos auditados.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-zinc-300">
+                      Sucursal Afectada <span className="text-amaru-copper">*</span>
+                    </label>
+                    <select
+                      value={sucursalMerma}
+                      onChange={(e) => setSucursalMerma(e.target.value as 'Calama' | 'Antofagasta')}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/30 text-slate-900 dark:text-white text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-amaru-copper"
+                    >
+                      <option value="Calama">
+                        Calama ({itemGerencial.stock.Calama || 0} disponibles)
+                      </option>
+                      <option value="Antofagasta">
+                        Antofagasta ({itemGerencial.stock.Antofagasta || 0} disponibles)
+                      </option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-zinc-300">
+                      Unidades a Descontar <span className="text-amaru-copper">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={itemGerencial.stock[sucursalMerma] || 1}
+                      value={cantidadMerma}
+                      onChange={(e) => setCantidadMerma(Number(e.target.value))}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/30 text-slate-900 dark:text-white font-mono text-sm font-bold text-center focus:outline-hidden focus:ring-2 focus:ring-amaru-copper"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-zinc-300">
+                    Tipo de Merma / Motivo Operativo <span className="text-amaru-copper">*</span>
+                  </label>
+                  <select
+                    value={tipoMerma}
+                    onChange={(e) =>
+                      setTipoMerma(e.target.value as 'Rotura en Taller' | 'Garantía Clínica' | 'Traspaso a Sucursal')
+                    }
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/30 text-slate-900 dark:text-white text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-amaru-copper"
+                  >
+                    <option value="Rotura en Taller">Rotura en Taller / Daño en Biselado</option>
+                    <option value="Garantía Clínica">Garantía Clínica / Reemplazo por Falla</option>
+                    <option value="Traspaso a Sucursal">Traspaso a Sucursal / Muestra Física</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-zinc-300">
+                    Detalle Obligatorio de la Merma <span className="text-amaru-copper">*</span>
+                  </label>
+                  <textarea
+                    rows={2}
+                    placeholder="Describa el incidente, folio del pedido involucrado o justificación de la baja..."
+                    value={motivoMerma}
+                    onChange={(e) => setMotivoMerma(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/30 text-slate-900 dark:text-white text-xs placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-amaru-copper"
+                    required
+                  />
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/5 flex items-center justify-between text-[11px]">
+                  <span className="text-slate-500 dark:text-zinc-400">Responsable de Baja:</span>
+                  <span className="font-bold text-rose-700 dark:text-rose-400">
+                    María González (Administradora)
+                  </span>
+                </div>
+
+                <div className="pt-2 flex items-center justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setModalGerencialAbierto(false)}
+                    className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-white/10 text-xs font-semibold text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md shadow-rose-600/20 active:scale-95 flex items-center gap-2"
+                  >
+                    <MinusCircle size={15} />
+                    <span>Confirmar Merma y Descontar Stock</span>
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

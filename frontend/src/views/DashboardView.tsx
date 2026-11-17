@@ -17,7 +17,6 @@ import {
   Calendar,
   Copy,
   Check,
-  Wallet,
   Receipt,
   Scale,
   Sparkles,
@@ -234,6 +233,80 @@ const MOCK_TRANSACCIONES_RECIENTES: TransaccionReciente[] = [
   },
 ];
 
+// ── Órdenes de Convenio Sindical en Cuarentena Pre-Laboratorio ──────────────
+
+export interface OrdenCuarentenaSindical {
+  id: string;
+  folio: string;
+  fechaHora: string;
+  rutTrabajador: string;
+  nombreTrabajador: string;
+  codigoConvenio: string;
+  nombreConvenio: string;
+  montoCubierto: number;
+  saldoMeson: number;
+  montoTotal: number;
+  armazon: string;
+  cristales: string;
+  sucursal: 'Calama' | 'Antofagasta';
+  estado: 'CUARENTENA_PRE_LABORATORIO' | 'PASE_LABORATORIO_APROBADO' | 'RECHAZADO_Y_LIBERADO';
+  motivoCuarentena: string;
+}
+
+export const MOCK_CUARENTENAS_SINDICALES: OrdenCuarentenaSindical[] = [
+  {
+    id: 'CUAR-001',
+    folio: 'FOLIO-SDC-8812',
+    fechaHora: 'Hoy · 09:40 hrs',
+    rutTrabajador: '15.892.431-K',
+    nombreTrabajador: 'Roberto Manríquez Pérez',
+    codigoConvenio: 'SDC1326',
+    nombreConvenio: 'Sindicato N°1 Chuquicamata',
+    montoCubierto: 150000,
+    saldoMeson: 35000,
+    montoTotal: 185000,
+    armazon: 'Titanium Shield Pro (EPP-TITAN-001)',
+    cristales: 'Monofocal Policarbonato Antirreflejo Azul',
+    sucursal: 'Calama',
+    estado: 'CUARENTENA_PRE_LABORATORIO',
+    motivoCuarentena: 'Validación de tope sindical y acreditación de socio',
+  },
+  {
+    id: 'CUAR-002',
+    folio: 'FOLIO-SDE-9421',
+    fechaHora: 'Hoy · 11:15 hrs',
+    rutTrabajador: '18.320.109-4',
+    nombreTrabajador: 'Camila Sepúlveda Bravo',
+    codigoConvenio: 'SDE1126',
+    nombreConvenio: 'Sindicato Escondida / BHP',
+    montoCubierto: 180000,
+    saldoMeson: 0,
+    montoTotal: 180000,
+    armazon: 'Ultralight Flex Titanio (FLEX-STEEL-003)',
+    cristales: 'Fotocromático Café con Filtro UV400',
+    sucursal: 'Antofagasta',
+    estado: 'CUARENTENA_PRE_LABORATORIO',
+    motivoCuarentena: 'Validación de tope sindical y acreditación de socio',
+  },
+  {
+    id: 'CUAR-003',
+    folio: 'FOLIO-SDM-7650',
+    fechaHora: 'Ayer · 16:50 hrs',
+    rutTrabajador: '16.744.920-8',
+    nombreTrabajador: 'Jorge Albornoz Toledo',
+    codigoConvenio: 'SDM0826',
+    nombreConvenio: 'Sindicato Ministro Hales',
+    montoCubierto: 140000,
+    saldoMeson: 45000,
+    montoTotal: 185000,
+    armazon: 'Lumière Acetato Italiano (BOUT-ACET-002)',
+    cristales: 'Progresivo Digital Balance Faena',
+    sucursal: 'Calama',
+    estado: 'CUARENTENA_PRE_LABORATORIO',
+    motivoCuarentena: 'Validación de tope sindical y acreditación de socio',
+  },
+];
+
 // ── Componentes de Soporte UI ────────────────────────────────────────────────
 
 interface KpiCardProps {
@@ -424,6 +497,108 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
   const [solicitudes, setSolicitudes] = useState<SolicitudReceta[]>(() => getSolicitudesRecetas());
   const [modalObservar, setModalObservar] = useState<{ id: string; nombre: string; rut: string } | null>(null);
   const [motivoTexto, setMotivoTexto] = useState<string>('Receta médica requiere firma legible o fecha actualizada.');
+
+  // ── Bandeja de Autorizaciones Pendientes (Cuarentena Pre-Laboratorio) ──
+  const [cuarentenas, setCuarentenas] = useState<OrdenCuarentenaSindical[]>(() => {
+    try {
+      const raw = localStorage.getItem('amaru_cuarentenas_sindicales');
+      if (raw) return JSON.parse(raw);
+    } catch {
+      // ignore
+    }
+    return MOCK_CUARENTENAS_SINDICALES;
+  });
+
+  const handleAprobarCuarentena = (orden: OrdenCuarentenaSindical) => {
+    const actualizadas = cuarentenas.map((c) =>
+      c.id === orden.id ? { ...c, estado: 'PASE_LABORATORIO_APROBADO' as const } : c
+    );
+    setCuarentenas(actualizadas);
+    localStorage.setItem('amaru_cuarentenas_sindicales', JSON.stringify(actualizadas));
+
+    const ahora = new Date().toLocaleString('es-CL');
+    try {
+      const raw = localStorage.getItem('amaru_anulaciones_rectificaciones');
+      const auditLog = raw ? JSON.parse(raw) : [];
+      auditLog.unshift({
+        id: `APROB-CUAR-${Date.now()}`,
+        tipo: 'APROBACION_CUARENTENA',
+        eventoTipo: 'AUTORIZACIÓN DE CUARENTENA SINDICAL',
+        folio: orden.folio,
+        paciente: orden.nombreTrabajador,
+        rut: orden.rutTrabajador,
+        fechaHoraExacta: ahora,
+        responsable: 'María González (Administradora)',
+        sucursal: orden.sucursal,
+        motivo: `Aprobación de cobertura sindical ${orden.nombreConvenio} (${orden.codigoConvenio}) por $${orden.montoCubierto.toLocaleString('es-CL')} CLP`,
+        detalleAntes: `Folio #${orden.folio} · Estado: CUARENTENA_PRE_LABORATORIO`,
+        detalleDespues: `Folio #${orden.folio} · Estado: PASE_LABORATORIO_APROBADO / EN_TALLER (Liberado a biselado)`,
+      });
+      localStorage.setItem('amaru_anulaciones_rectificaciones', JSON.stringify(auditLog));
+      window.dispatchEvent(new Event('amaru_anulaciones_updated'));
+    } catch {
+      // ignore
+    }
+
+    setFeedbackAccion(
+      `✓ Pase a Laboratorio Aprobado para Folio ${orden.folio} (${orden.nombreTrabajador}). Taller habilitado para biselado.`
+    );
+    setTimeout(() => setFeedbackAccion(null), 6000);
+  };
+
+  const handleRechazarCuarentena = (orden: OrdenCuarentenaSindical) => {
+    const actualizadas = cuarentenas.map((c) =>
+      c.id === orden.id ? { ...c, estado: 'RECHAZADO_Y_LIBERADO' as const } : c
+    );
+    setCuarentenas(actualizadas);
+    localStorage.setItem('amaru_cuarentenas_sindicales', JSON.stringify(actualizadas));
+
+    // Desbloqueo inmediato del candado de 30 días para el trabajador
+    desbloquearCodigoPorAnulacion(
+      orden.folio,
+      orden.rutTrabajador,
+      'María González (Administradora)',
+      'Rechazo de Cuarentena por Administradora'
+    );
+
+    // Reposición automática de stock (+1) a la sucursal de origen
+    registrarIngresoStock(
+      'EPP-TITAN-001',
+      orden.sucursal,
+      1,
+      `RECH-${orden.folio.replace('FOLIO-', '')}`,
+      'María González (Administradora)'
+    );
+
+    const ahora = new Date().toLocaleString('es-CL');
+    try {
+      const raw = localStorage.getItem('amaru_anulaciones_rectificaciones');
+      const auditLog = raw ? JSON.parse(raw) : [];
+      auditLog.unshift({
+        id: `RECH-CUAR-${Date.now()}`,
+        tipo: 'RECHAZO_CUARENTENA',
+        eventoTipo: 'RECHAZO DE CUARENTENA SINDICAL',
+        folio: orden.folio,
+        paciente: orden.nombreTrabajador,
+        rut: orden.rutTrabajador,
+        fechaHoraExacta: ahora,
+        responsable: 'María González (Administradora)',
+        sucursal: orden.sucursal,
+        motivo: 'Rechazo de solicitud sindical: Desistimiento o no acreditación de socio activo',
+        detalleAntes: `Folio #${orden.folio} · Estado: CUARENTENA_PRE_LABORATORIO · RUT ${orden.rutTrabajador} Bloqueado 30 días`,
+        detalleDespues: `Folio #${orden.folio} · Rechazado y Anulado · RUT ${orden.rutTrabajador} LIBERADO · +1 unidad devuelta a ${orden.sucursal}`,
+      });
+      localStorage.setItem('amaru_anulaciones_rectificaciones', JSON.stringify(auditLog));
+      window.dispatchEvent(new Event('amaru_anulaciones_updated'));
+    } catch {
+      // ignore
+    }
+
+    setFeedbackAccion(
+      `🚫 Solicitud ${orden.folio} rechazada. Se liberó el beneficio sindical del trabajador y se devolvió el armazón al stock de ${orden.sucursal}.`
+    );
+    setTimeout(() => setFeedbackAccion(null), 6000);
+  };
 
   const refrescarSolicitudes = useCallback(() => {
     setSolicitudes(getSolicitudesRecetas());
@@ -725,11 +900,53 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
     setTimeout(() => setFeedbackAccion(null), 5000);
   };
 
-  // KPIs dinámicos según filtro de sucursal
+  // KPIs dinámicos según filtro de sucursal (Simplicidad Ejecutiva)
   const kpiData = {
-    consolidado: { ventas: 24680000, margen: 15795200, cxc: 14850000, lentes: 38, enLab: 6 },
-    Calama: { ventas: 16450000, margen: 10528000, cxc: 9200000, lentes: 24, enLab: 4 },
-    Antofagasta: { ventas: 8230000, margen: 5267200, cxc: 5650000, lentes: 14, enLab: 2 },
+    consolidado: {
+      ventas: 24680000,
+      costo: 8884800,
+      margen: 15795200,
+      cxc: 10110000,
+      cxcConveniosCount: 18,
+      lentes: 214,
+      enLab: 6,
+      tasaRehaceres: '1.4%',
+      rehaceresCount: 3,
+      calamaUds: 128,
+      antofUds: 86,
+      calamaVentas: '$14.8M (60%)',
+      antofVentas: '$9.8M (40%)',
+    },
+    Calama: {
+      ventas: 16450000,
+      costo: 5922000,
+      margen: 10528000,
+      cxc: 6250000,
+      cxcConveniosCount: 11,
+      lentes: 128,
+      enLab: 4,
+      tasaRehaceres: '1.2%',
+      rehaceresCount: 2,
+      calamaUds: 128,
+      antofUds: 0,
+      calamaVentas: '$16.4M (100%)',
+      antofVentas: '—',
+    },
+    Antofagasta: {
+      ventas: 8230000,
+      costo: 2962800,
+      margen: 5267200,
+      cxc: 3860000,
+      cxcConveniosCount: 7,
+      lentes: 86,
+      enLab: 2,
+      tasaRehaceres: '1.6%',
+      rehaceresCount: 1,
+      calamaUds: 0,
+      antofUds: 86,
+      calamaVentas: '—',
+      antofVentas: '$8.2M (100%)',
+    },
   };
   const kpi = kpiData[filtroSucursal];
 
@@ -761,6 +978,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
         t.minera.toLowerCase().includes(busquedaFolio.toLowerCase()) ||
         t.responsable.toLowerCase().includes(busquedaFolio.toLowerCase())
       )
+  );
+
+  const cuarentenasFiltradas = cuarentenas.filter((c) => {
+    if (filtroSucursal === 'consolidado') return true;
+    return c.sucursal === filtroSucursal;
+  });
+  const pendientesCuarentena = cuarentenasFiltradas.filter(
+    (c) => c.estado === 'CUARENTENA_PRE_LABORATORIO'
   );
 
   return (
@@ -879,6 +1104,165 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
           </div>
         </div>
       )}
+
+      {/* ── 1. Bandeja de Aprobación de Cuarentena Sindical (Máxima Prioridad Gerencial) ── */}
+      <div className="card-zenith rounded-3xl p-6 relative overflow-hidden border border-amber-500/35 bg-gradient-to-br from-amber-500/[0.05] via-orange-500/[0.02] to-transparent shadow-md">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-white/5">
+          <div className="flex items-center gap-2.5">
+            <span className="p-2.5 rounded-xl bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30">
+              <Scale size={20} />
+            </span>
+            <div>
+              <div className="flex items-center gap-2.5">
+                <h2 className="text-base sm:text-lg font-black tracking-tight text-slate-900 dark:text-white">
+                  ⚖️ Autorizaciones Pendientes (Cuarentena Pre-Laboratorio)
+                </h2>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  <span>
+                    {pendientesCuarentena.length} En Cuarentena
+                  </span>
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
+                Órdenes de compra con convenio sindical retenidas para validación gerencial de tope y acreditación antes de enviar a biselado.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500 dark:text-zinc-400 hidden md:inline">
+              Filtro activo: <strong>{filtroSucursal === 'consolidado' ? 'Todas las sucursales' : filtroSucursal}</strong>
+            </span>
+          </div>
+        </div>
+
+        {/* Lista de Órdenes en Cuarentena */}
+        <div className="mt-4 space-y-3">
+          {cuarentenasFiltradas.length === 0 ? (
+            <div className="py-8 text-center text-xs text-slate-400">
+              No hay órdenes sindicales en cuarentena para la sucursal seleccionada.
+            </div>
+          ) : (
+            cuarentenasFiltradas.map((orden) => {
+              const esPendiente = orden.estado === 'CUARENTENA_PRE_LABORATORIO';
+              const esAprobado = orden.estado === 'PASE_LABORATORIO_APROBADO';
+              const esRechazado = orden.estado === 'RECHAZADO_Y_LIBERADO';
+
+              return (
+                <div
+                  key={orden.id}
+                  className={`p-4 rounded-2xl border transition-all ${
+                    esPendiente
+                      ? 'bg-white/95 dark:bg-[#1C1A18] border-amber-500/30 shadow-xs'
+                      : esAprobado
+                      ? 'bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-500/30 opacity-90'
+                      : 'bg-rose-50/60 dark:bg-rose-950/20 border-rose-500/30 opacity-80'
+                  }`}
+                >
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    {/* Información Principal */}
+                    <div className="space-y-1.5 flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono font-black text-xs text-amber-900 dark:text-amber-200 bg-amber-500/15 px-2.5 py-0.5 rounded-lg border border-amber-500/30">
+                          {orden.folio}
+                        </span>
+                        <span className="text-[11px] text-slate-500 dark:text-zinc-400 flex items-center gap-1">
+                          <Clock size={11} />
+                          {orden.fechaHora}
+                        </span>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300">
+                          <MapPin size={10} className="text-amaru-copper" />
+                          {orden.sucursal}
+                        </span>
+                        {esAprobado && (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                            <CheckCircle2 size={11} />
+                            Pase a Laboratorio Aprobado
+                          </span>
+                        )}
+                        {esRechazado && (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-500/20 text-rose-800 dark:text-rose-300 border border-rose-500/30 flex items-center gap-1">
+                            <X size={11} />
+                            Rechazado & Beneficio Liberado
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
+                        <div className="font-bold text-sm text-slate-900 dark:text-white">
+                          {orden.nombreTrabajador}
+                          <span className="font-mono text-xs font-normal text-slate-500 dark:text-zinc-400 ml-2">
+                            RUT: {orden.rutTrabajador}
+                          </span>
+                        </div>
+                        <div className="text-xs font-semibold text-amaru-copper flex items-center gap-1">
+                          <Building2 size={12} />
+                          <span>{orden.nombreConvenio} ({orden.codigoConvenio})</span>
+                        </div>
+                      </div>
+
+                      {/* Monto cubierto vs saldo mesón */}
+                      <div className="flex items-center gap-3 text-xs flex-wrap">
+                        <span className="text-slate-600 dark:text-zinc-400">
+                          Cobertura Convenio: <strong className="text-emerald-600 dark:text-emerald-400 font-mono">${orden.montoCubierto.toLocaleString('es-CL')} CLP</strong>
+                        </span>
+                        <span className="text-slate-400">·</span>
+                        <span className="text-slate-600 dark:text-zinc-400">
+                          Saldo Pagado en Mesón: <strong className="font-mono text-slate-800 dark:text-zinc-200">${orden.saldoMeson.toLocaleString('es-CL')} CLP</strong>
+                        </span>
+                        <span className="text-slate-400">·</span>
+                        <span className="text-slate-600 dark:text-zinc-400">
+                          Total: <strong className="font-mono text-slate-900 dark:text-white">${orden.montoTotal.toLocaleString('es-CL')} CLP</strong>
+                        </span>
+                      </div>
+
+                      {/* Armazón y cristales */}
+                      <div className="text-xs text-slate-600 dark:text-zinc-400 flex items-center gap-2 pt-1 border-t border-slate-100 dark:border-white/5">
+                        <span className="font-semibold text-slate-700 dark:text-zinc-300">👓 Armazón:</span> {orden.armazon}
+                        <span className="text-slate-400">|</span>
+                        <span className="font-semibold text-slate-700 dark:text-zinc-300">🔬 Cristales:</span> {orden.cristales}
+                      </div>
+
+                      <div className="text-[11px] text-amber-800 dark:text-amber-300/90 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20 font-medium">
+                        ⚖️ <strong>Motivo de Retención:</strong> {orden.motivoCuarentena}
+                      </div>
+                    </div>
+
+                    {/* Botones de Acción Rápida (Solo cuando está pendiente) */}
+                    {esPendiente ? (
+                      <div className="flex sm:flex-col lg:flex-row items-center gap-2 shrink-0 pt-2 lg:pt-0">
+                        <button
+                          type="button"
+                          onClick={() => handleAprobarCuarentena(orden)}
+                          className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md shadow-emerald-600/20 flex items-center justify-center gap-1.5"
+                        >
+                          <CheckCircle2 size={14} />
+                          <span>✅ Aprobar Pase a Laboratorio</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRechazarCuarentena(orden)}
+                          className="w-full sm:w-auto px-3.5 py-2.5 rounded-xl border border-rose-300 dark:border-rose-900 text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 active:scale-95 font-bold text-xs uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                        >
+                          <X size={14} />
+                          <span>🚫 Rechazar y Liberar Convenio</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="shrink-0 text-right">
+                        <span className="text-xs text-slate-400 italic">
+                          Procesado por María González
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
 
       {/* ── Recetas de Clientes por Aprobar (Portal ➔ Admin) ── */}
       <div className="card-zenith rounded-3xl p-6 relative overflow-hidden border border-amber-500/30 bg-gradient-to-br from-amber-500/[0.04] via-orange-500/[0.02] to-transparent shadow-md">
@@ -1087,41 +1471,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
         )}
       </div>
 
-      {/* ── 2. Tarjetas de KPI (Top Row) con Sparklines Decorativos y Cifras Vivas ── */}
+      {/* ── 2. Tarjetas de KPI (Top Row) - Simplicidad Ejecutiva Gerencial ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 animate-stagger-1">
-        {/* KPI 1: VENTAS TOTALES DEL MES */}
+        {/* KPI 1: RENTABILIDAD DEL MES */}
         <KpiCard
-          titulo="VENTAS TOTALES DEL MES"
-          valor={totalVentasConvenio}
-          indicador="+14.8% vs mes anterior"
+          titulo="Rentabilidad del Mes"
+          valor={formatCLP(animMargen)}
+          indicador={`+${Math.round((kpi.margen / kpi.ventas) * 100)}% Margen Neto`}
           tipoIndicador="positivo"
-          subtexto="Convenios corporativos y ventas particulares"
-          icono={<Wallet size={20} />}
+          subtexto={`Ventas Netas: ${totalVentasConvenio} · Costo: ${formatCLP(kpi.costo)}`}
+          icono={<TrendingUp size={20} />}
           iconBgClass="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/80 dark:border-emerald-800/40"
           iconColorClass="text-emerald-600 dark:text-emerald-400"
           sparklineVariant="ventas"
         />
 
-        {/* KPI 2: GANANCIA LÍQUIDA ESTIMADA */}
+        {/* KPI 2: CUENTAS POR COBRAR */}
         <KpiCard
-          titulo="GANANCIA LÍQUIDA ESTIMADA"
-          valor={formatCLP(animMargen)}
-          indicador={`${Math.round((kpi.margen / kpi.ventas) * 100).toFixed(1)}% Margen Comercial`}
-          tipoIndicador="positivo"
-          subtexto="Ingresos menos costo de armazones y cristales"
-          icono={<TrendingUp size={20} />}
-          iconBgClass="bg-blue-50 dark:bg-blue-950/40 border border-blue-200/80 dark:border-blue-800/40"
-          iconColorClass="text-blue-600 dark:text-blue-400"
-          sparklineVariant="epp"
-        />
-
-        {/* KPI 3: POR COBRAR A EMPRESAS (CONVENIOS) */}
-        <KpiCard
-          titulo="POR COBRAR A EMPRESAS (CONVENIOS)"
+          titulo="Cuentas por Cobrar"
           valor={totalFiniquitosRecuperados}
-          indicador={`Ver ${filtroSucursal === 'consolidado' ? 18 : filtroSucursal === 'Calama' ? 11 : 7} cobros pendientes`}
+          indicador={`${kpi.cxcConveniosCount} convenios pendientes`}
           tipoIndicador="alerta"
-          subtexto="Descuentos por planilla y convenios mineros"
+          subtexto="Subvenciones sindicales por liquidar a empresas"
           icono={<Receipt size={20} />}
           iconBgClass="bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/60"
           iconColorClass="text-amber-600 dark:text-amber-400"
@@ -1129,16 +1500,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSessionExpired }
           sparklineVariant="finiquito"
         />
 
-        {/* KPI 4: LENTES ENTREGADOS Y EN PROCESO */}
+        {/* KPI 3: TASA DE GARANTÍAS Y REHACERES */}
         <KpiCard
-          titulo="LENTES ENTREGADOS Y EN PROCESO"
-          valor={`${kpi.lentes} Lentes Entregados`}
-          indicador={`${kpi.enLab} en Laboratorio · Stock OK`}
+          titulo="Garantías y Rehaceres"
+          valor={`${kpi.tasaRehaceres} Rehaceres`}
+          indicador="Control de Calidad Óptimo"
           tipoIndicador="positivo"
-          subtexto={stock ? `${stock.total_alertas} alertas de stock crítico` : 'Stock saludable en ambas sucursales'}
-          icono={<AlertTriangle size={20} />}
-          iconBgClass="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200"
-          iconColorClass="text-emerald-600 dark:text-emerald-400"
+          subtexto={stock ? `${kpi.rehaceresCount} rehaceres (${stock.total_alertas} alertas stock)` : `${kpi.rehaceresCount} rehaceres en taller (Meta < 3.0%)`}
+          icono={<ShieldCheck size={20} />}
+          iconBgClass="bg-blue-50 dark:bg-blue-950/40 border border-blue-200/80 dark:border-blue-800/40"
+          iconColorClass="text-blue-600 dark:text-blue-400"
+          sparklineVariant="epp"
+        />
+
+        {/* KPI 4: COMPARATIVA CALAMA VS ANTOFAGASTA */}
+        <KpiCard
+          titulo="Calama vs. Antofagasta"
+          valor={`${kpi.calamaUds} Calama · ${kpi.antofUds} Antof.`}
+          indicador={`${kpi.lentes} lentes en total`}
+          tipoIndicador="positivo"
+          subtexto={`Calama: ${kpi.calamaVentas} · Antof: ${kpi.antofVentas}`}
+          icono={<Building2 size={20} />}
+          iconBgClass="bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200"
+          iconColorClass="text-indigo-600 dark:text-indigo-400"
           sparklineVariant="stock"
         />
       </div>
