@@ -4,6 +4,7 @@ import { Sun, Moon, Eye, EyeOff, QrCode, ArrowRight, User, Briefcase, ShieldChec
 import logoImg from '../assets/logo.jpg';
 import loginBg from '../assets/login.jpg';
 import { useTheme } from '../hooks/useTheme';
+import { ConsentimientoModal, tieneConsentimientoValido } from './ConsentimientoModal';
 
 interface LoginProps {
     onLoginSuccess: () => void;
@@ -18,6 +19,18 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+
+    // Control de Consentimiento Ley N° 21.719 / ISO 27001
+    const [consentimientoAceptado, setConsentimientoAceptado] = useState<boolean>(() =>
+        tieneConsentimientoValido()
+    );
+    const [modalConsultaAbierto, setModalConsultaAbierto] = useState<boolean>(false);
+    const [acordeonConsulta, setAcordeonConsulta] = useState<'terminos' | 'privacidad' | null>(null);
+
+    const abrirConsultaLegal = (seccion: 'terminos' | 'privacidad') => {
+        setAcordeonConsulta(seccion);
+        setModalConsultaAbierto(true);
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -154,9 +167,28 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                     </div>
 
                     {/* Sello de Confianza y Normativa Legal */}
-                    <div className="pt-6 border-t border-stone-200/60 dark:border-stone-800/80 mt-6 flex items-center justify-center gap-1.5 text-[11px] font-semibold text-stone-500 dark:text-stone-400">
-                        <ShieldCheck size={15} className="text-[#B85D19] shrink-0" />
-                        <span>Datos Protegidos · Ley 21.719 & Ley 21.663</span>
+                    <div className="pt-6 border-t border-stone-200/60 dark:border-stone-800/80 mt-6 flex flex-col items-center justify-center gap-2 text-[11px] font-semibold text-stone-500 dark:text-stone-400">
+                        <div className="flex items-center justify-center gap-1.5">
+                            <ShieldCheck size={15} className="text-[#B85D19] shrink-0" />
+                            <span>Datos Protegidos · Ley 21.719 y Ley 21.663</span>
+                        </div>
+                        <div className="flex items-center justify-center gap-1.5 text-[11px] font-medium">
+                            <button
+                                type="button"
+                                onClick={() => abrirConsultaLegal('terminos')}
+                                className="text-stone-500 dark:text-stone-400 hover:text-[#B85D19] dark:hover:text-[#C86D2D] underline-offset-2 hover:underline transition-colors cursor-pointer"
+                            >
+                                Términos y Condiciones
+                            </button>
+                            <span className="text-stone-400 dark:text-stone-600">·</span>
+                            <button
+                                type="button"
+                                onClick={() => abrirConsultaLegal('privacidad')}
+                                className="text-stone-500 dark:text-stone-400 hover:text-[#B85D19] dark:hover:text-[#C86D2D] underline-offset-2 hover:underline transition-colors cursor-pointer"
+                            >
+                                Política de Privacidad
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -334,6 +366,15 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                     </div>
                 </div>
             </div>
+
+            {/* Modal Bloqueante de Consentimiento (primera visita) o Consulta (desde footer) */}
+            <ConsentimientoModal
+                modo={!consentimientoAceptado ? 'bloqueante' : 'consulta'}
+                isOpen={!consentimientoAceptado || modalConsultaAbierto}
+                acordeonInicial={!consentimientoAceptado ? null : acordeonConsulta}
+                onAceptar={() => setConsentimientoAceptado(true)}
+                onCerrar={() => setModalConsultaAbierto(false)}
+            />
         </div>
     );
 };

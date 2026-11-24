@@ -39,7 +39,10 @@ export interface SolicitudReceta {
   consentimientoLey21719?: boolean;
   consentimientoMinsal?: boolean;
   declaracionAntifraude?: boolean;
+  declaracionVeracidadReceta?: boolean;
+  declaracionVeracidadAt?: string;
   codigoConvenio?: string;
+  codigoConvenioEstado?: 'VIGENTE' | 'NO_APLICA';
   contactoVerificado?: boolean;
 }
 

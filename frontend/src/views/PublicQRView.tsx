@@ -77,9 +77,11 @@ export const PublicQRView: React.FC = () => {
   } | null>(null);
 
   // ── FASE 2: Convenios Institucionales, Anti-Suplantación y Consentimiento MINSAL ──
+  const [empresaSindicato, setEmpresaSindicato] = useState<string>('Particular / Sin Convenio');
   const [codigoConvenio, setCodigoConvenio] = useState('');
   const [resultadoConvenio, setResultadoConvenio] = useState<ResultadoValidacionCodigo | null>(null);
   const [consentimientoMinsal, setConsentimientoMinsal] = useState(false);
+  const [declaracionVeracidadReceta, setDeclaracionVeracidadReceta] = useState(false);
   const [declaracionAntifraude, setDeclaracionAntifraude] = useState(false);
   const [contactoVerificado, setContactoVerificado] = useState(false);
   const [dispositivoBloqueadoMsg, setDispositivoBloqueadoMsg] = useState<string | null>(() => {
@@ -202,8 +204,32 @@ export const PublicQRView: React.FC = () => {
       setResultadoConvenio(null);
       return;
     }
-    const res = validarCodigoSindicato(limpio, rut);
+    // Al editar, limpiamos resultado previo hasta que valide por botón o onBlur
+    setResultadoConvenio(null);
+  };
+
+  const handleValidarCodigoConvenio = (codigoOverride?: string) => {
+    const target = (codigoOverride ?? codigoConvenio).trim().toUpperCase();
+    if (!target) {
+      setResultadoConvenio({
+        valido: false,
+        bloqueado: false,
+        mensajeError: 'Ingresa un código de convenio sindical para validar.',
+      });
+      return;
+    }
+    // Consulta estrictamente de solo lectura (NO activa bloqueo 30 días ni descuenta stock)
+    const res = validarCodigoSindicato(target, rut);
     setResultadoConvenio(res);
+  };
+
+  const handleEmpresaSindicatoChange = (nuevaEmpresa: string) => {
+    setEmpresaSindicato(nuevaEmpresa);
+    if (nuevaEmpresa === 'Particular / Sin Convenio') {
+      setCodigoConvenio('');
+      setResultadoConvenio(null);
+      setDeclaracionAntifraude(false);
+    }
   };
 
   const handleTelefonoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -216,10 +242,10 @@ export const PublicQRView: React.FC = () => {
     }
   };
 
-  const tieneConvenioObligatorio = tipoSolicitud === 'Consulta Convenio';
-  const convenioValido = !codigoConvenio.trim()
-    ? !tieneConvenioObligatorio
-    : (resultadoConvenio?.valido ?? false);
+  const esConvenioEmpresa = empresaSindicato !== 'Particular / Sin Convenio';
+  const convenioValido = !esConvenioEmpresa
+    ? true
+    : Boolean(codigoConvenio.trim()) && Boolean(resultadoConvenio?.valido) && !resultadoConvenio?.bloqueado;
 
   const paso1Valido =
     Boolean(rut) &&
@@ -300,10 +326,13 @@ export const PublicQRView: React.FC = () => {
     setPaso(2);
   };
 
-  const requiereAntifraude = Boolean(codigoConvenio.trim()) || tipoSolicitud === 'Consulta Convenio';
+  const requiereAntifraude = esConvenioEmpresa || Boolean(codigoConvenio.trim());
   const paso2Valido =
     estadoReceta === 'vigente'
-      ? Boolean(archivoReceta) && consentimientoMinsal && (!requiereAntifraude || declaracionAntifraude)
+      ? Boolean(archivoReceta) &&
+        declaracionVeracidadReceta &&
+        consentimientoMinsal &&
+        (!requiereAntifraude || declaracionAntifraude)
       : true;
 
   // ── Completar Solicitud con Receta o Directo (Cuarentena Zero-Trust) ────────
@@ -319,7 +348,8 @@ export const PublicQRView: React.FC = () => {
       return;
     }
 
-    const infoConv = codigoConvenio.trim() ? CATALOGO_CODIGOS_SINDICALES[codigoConvenio.trim().toUpperCase()] : undefined;
+    const codigoNormalizado = esConvenioEmpresa ? codigoConvenio.trim().toUpperCase() : '';
+    const infoConv = codigoNormalizado ? CATALOGO_CODIGOS_SINDICALES[codigoNormalizado] : undefined;
     const esTipoB = infoConv?.tipo === 'TIPO_B';
 
     const nueva = agregarSolicitudReceta({
@@ -328,8 +358,8 @@ export const PublicQRView: React.FC = () => {
       correo: `${rut.replace(/[^0-9kK]/g, '')}@solicitud.amaru.cl`,
       telefono: telefono.trim(),
       ciudad: sucursal,
-      tipoUsuario: infoConv ? 'Convenio Minero' : tipoSolicitud === 'Consulta Convenio' ? 'Convenio Minero' : 'Particular',
-      empresa: infoConv?.empresa || (tipoSolicitud === 'Consulta Convenio' ? 'Convenio Institucional' : undefined),
+      tipoUsuario: esConvenioEmpresa || infoConv ? 'Convenio Minero' : 'Particular',
+      empresa: infoConv?.empresa || (esConvenioEmpresa ? empresaSindicato : undefined),
       tipoReceta: estadoReceta === 'vigente' ? 'vigente' : 'sin_receta',
       archivoNombre: archivoReceta ? archivoReceta.name : 'Receta_Digital.pdf',
       dioptriasManuales: true,
@@ -355,8 +385,11 @@ export const PublicQRView: React.FC = () => {
       tipoSolicitud: 'PRE-INGRESO WEB (PENDIENTE CONFIRMACIÓN PRESENCIAL / WHATSAPP)',
       consentimientoLey21719: true,
       consentimientoMinsal: true,
+      declaracionVeracidadReceta: estadoReceta === 'vigente' ? true : undefined,
+      declaracionVeracidadAt: estadoReceta === 'vigente' ? new Date().toISOString() : undefined,
       declaracionAntifraude: requiereAntifraude ? declaracionAntifraude : false,
-      codigoConvenio: codigoConvenio.trim().toUpperCase() || undefined,
+      codigoConvenio: codigoNormalizado || undefined,
+      codigoConvenioEstado: codigoNormalizado && resultadoConvenio?.valido ? 'VIGENTE' : 'NO_APLICA',
       contactoVerificado: false,
     });
 
@@ -402,9 +435,11 @@ export const PublicQRView: React.FC = () => {
     setCodigoPreIngreso('');
     setReservaDetalle(null);
     setSolicitudConfirmada(null);
+    setEmpresaSindicato('Particular / Sin Convenio');
     setCodigoConvenio('');
     setResultadoConvenio(null);
     setConsentimientoMinsal(false);
+    setDeclaracionVeracidadReceta(false);
     setDeclaracionAntifraude(false);
     setContactoVerificado(false);
     setFechaEmisionReceta(new Date().toISOString().split('T')[0]);
@@ -581,6 +616,9 @@ export const PublicQRView: React.FC = () => {
                         } else {
                           setEstadoReceta('vigente');
                         }
+                        if (nuevoTipo === 'Consulta Convenio' && empresaSindicato === 'Particular / Sin Convenio') {
+                          setEmpresaSindicato('Sindicato N°1 Chuquicamata (Codelco)');
+                        }
                       }}
                       className={`p-2.5 rounded-2xl border text-[11px] font-bold text-center transition-all cursor-pointer truncate ${
                         tipoSolicitud === item.id
@@ -670,65 +708,118 @@ export const PublicQRView: React.FC = () => {
                 )}
               </div>
 
-              {/* Código de Convenio Institucional (Tipo A o Tipo B) */}
+              {/* Selector EMPRESA / SINDICATO EN FAENA * */}
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 dark:text-stone-300 mb-1.5 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
                     <Building size={14} className="text-[#B85D19]" />
-                    <span>Código de Convenio {tipoSolicitud === 'Consulta Convenio' ? <span className="text-[#B85D19]">*</span> : <span className="text-stone-400 font-normal lowercase">(opcional)</span>}</span>
+                    <span>
+                      EMPRESA / SINDICATO EN FAENA <span className="text-[#B85D19]">*</span>
+                    </span>
                   </span>
-                  <span className="text-[10px] text-stone-400 font-normal">Tipo A (Descuento) o Tipo B (Planilla)</span>
+                  <span className="text-[10px] text-stone-400 font-normal">Particular o Convenio</span>
                 </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    placeholder="Ej: SDC1326, COL-CALAMA, JJVV-NORTE, SDM0826..."
-                    value={codigoConvenio}
-                    onChange={(e) => handleCodigoConvenioChange(e.target.value)}
-                    autoComplete="off"
-                    className={`w-full bg-stone-50 dark:bg-[#1A1816] border rounded-2xl px-4 py-3 text-sm font-mono text-stone-900 dark:text-white uppercase placeholder:font-sans placeholder:normal-case placeholder:text-stone-400 outline-none transition-all ${
-                      resultadoConvenio?.bloqueado
-                        ? 'border-red-500 focus:ring-2 focus:ring-red-400'
-                        : resultadoConvenio?.valido
-                        ? 'border-emerald-600 focus:ring-2 focus:ring-emerald-400'
-                        : 'border-stone-200 dark:border-stone-700 focus:border-[#B85D19] focus:ring-2 focus:ring-[#B85D19]/20'
-                    }`}
-                  />
-                  {resultadoConvenio?.valido && (
-                    <div className="absolute right-3.5 top-3.5 text-emerald-600">
-                      <CheckCircle2 size={18} />
+                <select
+                  value={empresaSindicato}
+                  onChange={(e) => handleEmpresaSindicatoChange(e.target.value)}
+                  className="w-full bg-stone-50 dark:bg-[#1A1816] border border-stone-200 dark:border-stone-700 rounded-2xl px-4 py-3 text-sm text-stone-900 dark:text-white outline-none focus:border-[#B85D19] focus:ring-2 focus:ring-[#B85D19]/20 transition-all font-medium cursor-pointer"
+                >
+                  <option value="Particular / Sin Convenio">Particular / Sin Convenio</option>
+                  <option value="Sindicato N°1 Chuquicamata (Codelco)">Sindicato N°1 Chuquicamata (Codelco)</option>
+                  <option value="Sindicato Ministro Hales (Codelco)">Sindicato Ministro Hales (Codelco)</option>
+                  <option value="Sindicato Escondida / BHP">Sindicato Escondida / BHP</option>
+                  <option value="Bienestar Gobernación / Servicio Público El Loa">Bienestar Gobernación / Servicio Público El Loa</option>
+                  <option value="Convenio Colegios & Docentes Calama">Convenio Colegios & Docentes Calama</option>
+                  <option value="Convenio Juntas de Vecinos Norte">Convenio Juntas de Vecinos Norte</option>
+                  <option value="Otro Convenio / Sindicato en Faena">Otro Convenio / Sindicato en Faena</option>
+                </select>
+              </div>
+
+              {/* Campo Condicional Obligatorio: CÓDIGO DE CONVENIO SINDICAL * */}
+              {esConvenioEmpresa && (
+                <div className="p-4 rounded-2xl bg-amber-500/[0.05] dark:bg-amber-950/20 border border-amber-500/30 space-y-2.5 animate-in fade-in duration-200">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-stone-800 dark:text-stone-200 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <ShieldCheck size={14} className="text-[#B85D19]" />
+                      <span>
+                        CÓDIGO DE CONVENIO SINDICAL <span className="text-[#B85D19]">*</span>
+                      </span>
+                    </span>
+                    <span className="text-[10px] text-stone-500 dark:text-stone-400 font-normal">Consulta en solo lectura</span>
+                  </label>
+
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        placeholder="Ej: SDC1326, SDE1126"
+                        value={codigoConvenio}
+                        onChange={(e) => handleCodigoConvenioChange(e.target.value)}
+                        onBlur={() => {
+                          if (codigoConvenio.trim()) handleValidarCodigoConvenio();
+                        }}
+                        autoComplete="off"
+                        className={`w-full bg-white dark:bg-[#1A1816] border rounded-xl px-4 py-2.5 text-sm font-mono text-stone-900 dark:text-white uppercase placeholder:font-sans placeholder:normal-case placeholder:text-stone-400 outline-none transition-all ${
+                          resultadoConvenio && (!resultadoConvenio.valido || resultadoConvenio.bloqueado)
+                            ? 'border-rose-500 focus:ring-2 focus:ring-rose-400'
+                            : resultadoConvenio?.valido
+                            ? 'border-emerald-600 focus:ring-2 focus:ring-emerald-400'
+                            : 'border-stone-300 dark:border-stone-700 focus:border-[#B85D19] focus:ring-2 focus:ring-[#B85D19]/20'
+                        }`}
+                      />
+                      {resultadoConvenio?.valido && !resultadoConvenio.bloqueado && (
+                        <div className="absolute right-3 top-2.5 text-emerald-600">
+                          <CheckCircle2 size={18} />
+                        </div>
+                      )}
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleValidarCodigoConvenio()}
+                      className="px-4 py-2.5 rounded-xl bg-[#B85D19] hover:bg-[#8F3B09] active:scale-[0.98] text-white font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shrink-0 shadow-xs"
+                    >
+                      Validar Código
+                    </button>
+                  </div>
+
+                  {/* Estados Visuales de Validación */}
+                  {resultadoConvenio && (
+                    resultadoConvenio.valido && !resultadoConvenio.bloqueado ? (
+                      <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/35 text-emerald-900 dark:text-emerald-200 text-xs font-medium space-y-2 animate-in fade-in">
+                        <p className="font-bold">
+                          ✅ Código Vigente: {resultadoConvenio.infoSindicato?.nombre}
+                          {resultadoConvenio.infoSindicato?.tipo === 'TIPO_B' && resultadoConvenio.infoSindicato.tope
+                            ? ` · Cobertura hasta $${resultadoConvenio.infoSindicato.tope.toLocaleString('es-CL')} CLP`
+                            : resultadoConvenio.infoSindicato?.porcentajeDescuento
+                            ? ` · ${resultadoConvenio.infoSindicato.porcentajeDescuento}% Descuento Directo`
+                            : ''}
+                        </p>
+                        <label className="flex items-start gap-2 pt-2 border-t border-emerald-500/20 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={declaracionAntifraude}
+                            onChange={(e) => setDeclaracionAntifraude(e.target.checked)}
+                            className="mt-0.5 h-3.5 w-3.5 rounded text-[#B85D19] accent-[#B85D19] cursor-pointer shrink-0"
+                          />
+                          <span className="text-[11px] text-emerald-950 dark:text-emerald-200 leading-tight">
+                            <strong>Declaración Jurada:</strong> Declaro bajo juramento pertenecer a {resultadoConvenio.infoSindicato?.nombre || 'la institución'} y exhibir mi credencial en sucursal.
+                          </span>
+                        </label>
+                      </div>
+                    ) : (
+                      <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/35 text-rose-900 dark:text-rose-200 text-xs space-y-1 animate-in fade-in">
+                        <p className="font-bold">
+                          🚫 Código no vigente o inválido. Verifica con tu sindicato o cambia a Particular.
+                        </p>
+                        {resultadoConvenio.mensajeError && (
+                          <p className="text-[11px] opacity-90">{resultadoConvenio.mensajeError}</p>
+                        )}
+                      </div>
+                    )
                   )}
                 </div>
-
-                {/* Feedback del Convenio */}
-                {resultadoConvenio && (
-                  <div
-                    className={`mt-2 p-3 rounded-2xl text-xs font-medium border leading-relaxed ${
-                      resultadoConvenio.bloqueado
-                        ? 'bg-rose-500/10 border-rose-500/30 text-rose-900 dark:text-rose-300'
-                        : resultadoConvenio.valido
-                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-900 dark:text-emerald-200'
-                        : 'bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200'
-                    }`}
-                  >
-                    <p>{resultadoConvenio.valido ? resultadoConvenio.mensajeExito : resultadoConvenio.mensajeError}</p>
-                    {resultadoConvenio.valido && (
-                      <label className="flex items-start gap-2 mt-2 pt-2 border-t border-emerald-500/20 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={declaracionAntifraude}
-                          onChange={(e) => setDeclaracionAntifraude(e.target.checked)}
-                          className="mt-0.5 h-3.5 w-3.5 rounded text-[#B85D19] accent-[#B85D19] cursor-pointer shrink-0"
-                        />
-                        <span className="text-[11px] text-emerald-950 dark:text-emerald-200 leading-tight">
-                          <strong>Declaración Jurada:</strong> Declaro bajo juramento pertenecer a {resultadoConvenio.infoSindicato?.nombre || 'la institución'} y exhibir mi credencial en sucursal.
-                        </span>
-                      </label>
-                    )}
-                  </div>
-                )}
-              </div>
+              )}
 
               {/* Checkbox Obligatorio Ley N° 21.719 (Consentimiento Activo Desmarcado) */}
               <div className="bg-stone-50 dark:bg-[#1A1816] border border-stone-200 dark:border-stone-700 p-3.5 rounded-2xl space-y-1">
@@ -758,7 +849,7 @@ export const PublicQRView: React.FC = () => {
                       : 'bg-stone-200 text-stone-400 dark:bg-stone-800 dark:text-stone-600 border border-stone-300 dark:border-stone-700 cursor-not-allowed shadow-none'
                   }`}
                 >
-                  <span>Continuar a Evaluación</span>
+                  <span>CONTINUAR A VALIDACIÓN CLÍNICA (PASO 2)</span>
                   <ArrowRight size={16} />
                 </button>
               </div>
@@ -797,7 +888,7 @@ export const PublicQRView: React.FC = () => {
                   />
                   <div>
                     <p className="text-xs font-bold text-stone-900 dark:text-white">
-                      Tengo Receta Vigente (&lt; 12 meses)
+                      Receta Vigente (&lt; 365 DÍAS)
                     </p>
                     <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
                       Dispongo de receta médica emitida recientemente para adjuntar.
@@ -1146,8 +1237,31 @@ export const PublicQRView: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Doble Checkbox Legal Obligatorio (Sin fotos de carnet/credencial) */}
+                  {/* Declaración Obligatoria de Autenticidad Documental + Consentimientos */}
                   <div className="space-y-2.5 pt-2 border-t border-stone-200 dark:border-stone-700/80">
+                    {/* Casilla Obligatoria de Veracidad Documental (Art. 197/202 CP & MINSAL) */}
+                    <label
+                      className={`flex items-start gap-2.5 p-3.5 rounded-2xl border transition-all cursor-pointer ${
+                        declaracionVeracidadReceta
+                          ? 'bg-emerald-500/10 border-emerald-500/35'
+                          : 'bg-amber-500/[0.08] border-amber-500/35'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={declaracionVeracidadReceta}
+                        onChange={(e) => setDeclaracionVeracidadReceta(e.target.checked)}
+                        className="mt-0.5 h-4 w-4 rounded-sm text-[#B85D19] accent-[#B85D19] cursor-pointer shrink-0"
+                        required
+                      />
+                      <span className="text-xs text-stone-800 dark:text-stone-200 leading-relaxed select-none">
+                        <strong className="text-amber-900 dark:text-amber-300">
+                          Declaración de Autenticidad Documental:
+                        </strong>{' '}
+                        Declaro bajo mi responsabilidad que la receta oftalmológica adjunta es fidedigna, legítima, emitida por un profesional habilitado y tiene menos de 365 días de antigüedad. Comprendo que la adulteración de documentos clínicos o el uso fraudulento de convenios será bloqueado y auditado conforme a la normativa sanitaria vigente.
+                      </span>
+                    </label>
+
                     <label className="flex items-start gap-2.5 p-3.5 rounded-2xl bg-stone-50 dark:bg-[#1A1816] border border-stone-200 dark:border-stone-700 cursor-pointer">
                       <input
                         type="checkbox"
@@ -1197,7 +1311,7 @@ export const PublicQRView: React.FC = () => {
                           : 'bg-stone-200 text-stone-400 dark:bg-stone-800 dark:text-stone-600 border border-stone-300 dark:border-stone-700 cursor-not-allowed shadow-none font-bold'
                       }`}
                     >
-                      <span>Enviar Solicitud a Revisión</span>
+                      <span>CONTINUAR A COTIZACIÓN &amp; PAGO (PASO 3)</span>
                       <ArrowRight size={15} />
                     </button>
                   </div>
@@ -1221,7 +1335,8 @@ export const PublicQRView: React.FC = () => {
                         correo: `${rut.replace(/[^0-9kK]/g, '')}@solicitud.amaru.cl`,
                         telefono: telefono.trim(),
                         ciudad: sucursal,
-                        tipoUsuario: tipoSolicitud === 'Consulta Convenio' ? 'Convenio Minero' : 'Particular',
+                        tipoUsuario: esConvenioEmpresa ? 'Convenio Minero' : 'Particular',
+                        empresa: esConvenioEmpresa ? empresaSindicato : undefined,
                         tipoReceta: 'sin_receta',
                         archivoNombre: 'Evaluacion_Visual_Agendada.pdf',
                         armazon: armazonSeleccionado,
@@ -1230,6 +1345,8 @@ export const PublicQRView: React.FC = () => {
                         origen: 'QR_PUBLICO',
                         tipoSolicitud: 'Agendar Examen Visual',
                         consentimientoLey21719: true,
+                        codigoConvenio: esConvenioEmpresa && codigoConvenio.trim() ? codigoConvenio.trim().toUpperCase() : undefined,
+                        codigoConvenioEstado: esConvenioEmpresa && resultadoConvenio?.valido ? 'VIGENTE' : 'NO_APLICA',
                       });
 
                       registrarEnvio();

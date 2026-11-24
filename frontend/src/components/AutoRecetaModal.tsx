@@ -26,6 +26,10 @@ import {
   type TipoUsuario,
   type SolicitudReceta,
 } from '../services/recetasService';
+import {
+  validarCodigoSindicato,
+  type ResultadoValidacionCodigo,
+} from '../services/convenioSindicatoService';
 
 export type ModeloInteresEnum = 'Titanium Shield Pro' | 'Acetato Vintage Lumière' | 'Ultralight Flex-Steel';
 
@@ -62,6 +66,8 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
   const [ciudad, setCiudad] = useState<CiudadAtencion>(() => (localStorage.getItem('amaru_ciudad') as CiudadAtencion) || 'Calama');
   const [tipoUsuario, setTipoUsuario] = useState<TipoUsuario>('Convenio Minero');
   const [empresaFaena, setEmpresaFaena] = useState<string>(EMPRESAS_CONVENIO_DEFAULT[0]);
+  const [codigoConvenio, setCodigoConvenio] = useState<string>('');
+  const [resultadoConvenio, setResultadoConvenio] = useState<ResultadoValidacionCodigo | null>(null);
   // Consentimiento legal estricto: NUNCA pre-marcado (inicia en false)
   const [autorizacionLey, setAutorizacionLey] = useState<boolean>(false);
   const [mostrarDerechos, setMostrarDerechos] = useState<boolean>(false);
@@ -70,6 +76,7 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
   const [tipoReceta, setTipoReceta] = useState<'vigente' | 'sin_receta'>('vigente');
   const [archivo, setArchivo] = useState<File | null>(null);
   const [archivoNombreSimulado, setArchivoNombreSimulado] = useState<string>('Receta_Medica_Vigente_2026.pdf');
+  const [declaracionVeracidadReceta, setDeclaracionVeracidadReceta] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [deseaDigitar, setDeseaDigitar] = useState<boolean>(true);
@@ -130,9 +137,40 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
     }
   };
 
+  const handleValidarCodigoConvenio = (codigoOverride?: string) => {
+    const target = (codigoOverride ?? codigoConvenio).trim().toUpperCase();
+    if (!target) {
+      setResultadoConvenio({
+        valido: false,
+        bloqueado: false,
+        mensajeError: 'Ingresa un código de convenio sindical para validar.',
+      });
+      return;
+    }
+    // Consulta estrictamente de solo lectura (sin activar bloqueos ni descontar stock)
+    const res = validarCodigoSindicato(target, rutFijo);
+    setResultadoConvenio(res);
+  };
+
+  const convenioPaso1Valido =
+    tipoUsuario !== 'Convenio Minero' ||
+    (Boolean(codigoConvenio.trim()) &&
+      Boolean(resultadoConvenio?.valido) &&
+      !resultadoConvenio?.bloqueado);
+
+  const paso1Habilitado = autorizacionLey && convenioPaso1Valido;
+
+  const paso2Habilitado =
+    tipoReceta === 'sin_receta' ||
+    (Boolean(archivo) && declaracionVeracidadReceta);
+
   const avanzarPaso1a2 = () => {
     if (!nombreCompleto.trim()) {
       setErrorValidacion('Por favor ingresa tu Nombre y Apellido completo.');
+      return;
+    }
+    if (!convenioPaso1Valido) {
+      setErrorValidacion('Debes validar un Código de Convenio Sindical vigente o cambiar a Cliente Particular.');
       return;
     }
     if (!autorizacionLey) {
@@ -149,6 +187,10 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
   };
 
   const avanzarPaso2a3 = () => {
+    if (!paso2Habilitado) {
+      setErrorValidacion('Debes adjuntar tu receta vigente y marcar la Declaración de Autenticidad Documental.');
+      return;
+    }
     setErrorValidacion('');
     setPasoActual(3);
   };
@@ -164,6 +206,15 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
           ? 'Descuento por Planilla en Convenio (3 cuotas sin interés)'
           : 'Pago Particular Webpay Plus / Transferencia';
 
+      const codigoNormalizado =
+        tipoUsuario === 'Convenio Minero' && codigoConvenio.trim()
+          ? codigoConvenio.trim().toUpperCase()
+          : undefined;
+
+      const hashArchivoReceta = archivo
+        ? `sha256_${archivo.name.replace(/[^a-zA-Z0-9]/g, '')}_${archivo.size}_${archivo.lastModified.toString(16)}`
+        : undefined;
+
       const nuevaSolicitud = agregarSolicitudReceta({
         rut: rutFijo,
         nombre: nombreCompleto.trim(),
@@ -171,9 +222,13 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
         telefono,
         ciudad,
         tipoUsuario,
-        empresa: tipoUsuario === 'Convenio Minero' ? empresaFaena : undefined,
+        empresa:
+          tipoUsuario === 'Convenio Minero'
+            ? resultadoConvenio?.infoSindicato?.empresa || empresaFaena
+            : undefined,
         tipoReceta,
         archivoNombre: archivo?.name || archivoNombreSimulado,
+        hashArchivoReceta,
         dioptriasManuales: deseaDigitar,
         odEsfera: deseaDigitar ? odEsfera : undefined,
         odCilindro: deseaDigitar ? odCilindro : undefined,
@@ -184,6 +239,15 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
         armazon: armazonSeleccionado,
         monto: montoTotal,
         modalidadPago,
+        origen: 'PORTAL_PACIENTE',
+        consentimientoLey21719: true,
+        codigoConvenio: codigoNormalizado,
+        codigoConvenioEstado:
+          codigoNormalizado && resultadoConvenio?.valido && !resultadoConvenio.bloqueado
+            ? 'VIGENTE'
+            : 'NO_APLICA',
+        declaracionVeracidadReceta: tipoReceta === 'vigente' ? true : undefined,
+        declaracionVeracidadAt: tipoReceta === 'vigente' ? new Date().toISOString() : undefined,
       });
 
       // Actualizar perfil local
@@ -201,6 +265,10 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
         setEnviando(false);
         setEnviadoExito(false);
         setPasoActual(1);
+        setArchivo(null);
+        setDeclaracionVeracidadReceta(false);
+        setCodigoConvenio('');
+        setResultadoConvenio(null);
         onClose();
       }, 2000);
     } catch (err: any) {
@@ -461,7 +529,12 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
                   </div>
 
                   <div
-                    onClick={() => setTipoUsuario('Particular')}
+                    onClick={() => {
+                      setTipoUsuario('Particular');
+                      setCodigoConvenio('');
+                      setResultadoConvenio(null);
+                      setErrorValidacion('');
+                    }}
                     className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
                       tipoUsuario === 'Particular'
                         ? 'bg-sky-500/10 border-sky-500/50 shadow-xs'
@@ -484,23 +557,98 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
                 </div>
               </div>
 
-              {/* Selector EMPRESA / SINDICATO EN FAENA si es Convenio */}
+              {/* Selector EMPRESA / SINDICATO EN FAENA + Código Sindical si es Convenio */}
               {tipoUsuario === 'Convenio Minero' && (
-                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 space-y-1.5 animate-in fade-in duration-150">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-zinc-400 block">
-                    Empresa / Sindicato en Faena *
-                  </label>
-                  <select
-                    value={empresaFaena}
-                    onChange={(e) => setEmpresaFaena(e.target.value)}
-                    className="w-full px-3 py-2 bg-white dark:bg-[#1E1C1A] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-semibold text-slate-800 dark:text-zinc-200 focus:outline-hidden focus:ring-2 focus:ring-amaru-copper"
-                  >
-                    {EMPRESAS_CONVENIO_DEFAULT.map((emp) => (
-                      <option key={emp} value={emp}>
-                        {emp}
-                      </option>
-                    ))}
-                  </select>
+                <div className="space-y-3 animate-in fade-in duration-150">
+                  <div className="p-3 rounded-2xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-zinc-400 block">
+                      Empresa / Sindicato en Faena *
+                    </label>
+                    <select
+                      value={empresaFaena}
+                      onChange={(e) => setEmpresaFaena(e.target.value)}
+                      className="w-full px-3 py-2 bg-white dark:bg-[#1E1C1A] border border-slate-200 dark:border-white/10 rounded-xl text-xs font-semibold text-slate-800 dark:text-zinc-200 focus:outline-hidden focus:ring-2 focus:ring-amaru-copper"
+                    >
+                      {EMPRESAS_CONVENIO_DEFAULT.map((emp) => (
+                        <option key={emp} value={emp}>
+                          {emp}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Campo Obligatorio: CÓDIGO DE CONVENIO SINDICAL * */}
+                  <div className="p-3.5 rounded-2xl bg-amber-500/[0.05] dark:bg-amber-950/20 border border-amber-500/30 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
+                        <ShieldCheck size={13} className="text-amaru-copper" />
+                        <span>Código de Convenio Sindical *</span>
+                      </label>
+                      <span className="text-[10px] text-slate-500 dark:text-zinc-400">
+                        Validación en solo lectura
+                      </span>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <div className="relative flex-1">
+                        <input
+                          type="text"
+                          placeholder="Ej: SDC1326, SDE1126"
+                          value={codigoConvenio}
+                          onChange={(e) => {
+                            setCodigoConvenio(e.target.value.toUpperCase());
+                            setResultadoConvenio(null);
+                          }}
+                          onBlur={() => {
+                            if (codigoConvenio.trim()) handleValidarCodigoConvenio();
+                          }}
+                          autoComplete="off"
+                          className={`w-full px-3.5 py-2 bg-white dark:bg-[#1E1C1A] border rounded-xl font-mono text-xs uppercase text-slate-900 dark:text-white placeholder:font-sans placeholder:normal-case placeholder:text-slate-400 focus:outline-hidden transition-all ${
+                            resultadoConvenio && (!resultadoConvenio.valido || resultadoConvenio.bloqueado)
+                              ? 'border-rose-500 focus:ring-2 focus:ring-rose-400'
+                              : resultadoConvenio?.valido
+                              ? 'border-emerald-600 focus:ring-2 focus:ring-emerald-400'
+                              : 'border-slate-300 dark:border-white/10 focus:ring-2 focus:ring-amaru-copper'
+                          }`}
+                        />
+                        {resultadoConvenio?.valido && !resultadoConvenio.bloqueado && (
+                          <span className="absolute right-2.5 top-2 text-emerald-600">
+                            <CheckCircle2 size={15} />
+                          </span>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleValidarCodigoConvenio()}
+                        className="px-4 py-2 rounded-xl bg-[#B85D19] hover:bg-[#8F3B09] active:scale-[0.98] text-white font-bold text-[11px] uppercase tracking-wider transition-all cursor-pointer shrink-0 shadow-xs"
+                      >
+                        Validar Código
+                      </button>
+                    </div>
+
+                    {resultadoConvenio && (
+                      resultadoConvenio.valido && !resultadoConvenio.bloqueado ? (
+                        <div className="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/35 text-emerald-900 dark:text-emerald-200 text-[11px] font-bold animate-in fade-in">
+                          ✅ Código Vigente: {resultadoConvenio.infoSindicato?.nombre}
+                          {resultadoConvenio.infoSindicato?.tipo === 'TIPO_B' && resultadoConvenio.infoSindicato.tope
+                            ? ` · Cobertura hasta $${resultadoConvenio.infoSindicato.tope.toLocaleString('es-CL')} CLP`
+                            : resultadoConvenio.infoSindicato?.porcentajeDescuento
+                            ? ` · ${resultadoConvenio.infoSindicato.porcentajeDescuento}% Descuento Directo`
+                            : ''}
+                        </div>
+                      ) : (
+                        <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/35 text-rose-900 dark:text-rose-200 text-[11px] space-y-1 animate-in fade-in">
+                          <p className="font-bold">
+                            🚫 Código no vigente o inválido. Verifica con tu sindicato o cambia a Cliente Particular.
+                          </p>
+                          {resultadoConvenio.mensajeError && (
+                            <p className="text-[10px] opacity-90">{resultadoConvenio.mensajeError}</p>
+                          )}
+                        </div>
+                      )
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -745,6 +893,34 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
                   </div>
                 )}
               </div>
+
+              {/* Declaración Obligatoria de Veracidad y Autenticidad Documental (solo Receta Vigente) */}
+              {tipoReceta === 'vigente' && (
+                <label
+                  className={`flex items-start gap-2.5 p-3.5 rounded-2xl border transition-all cursor-pointer animate-in fade-in duration-200 ${
+                    declaracionVeracidadReceta
+                      ? 'bg-emerald-500/10 border-emerald-500/40'
+                      : 'bg-amber-500/[0.08] border-amber-500/35 hover:border-amber-500/60'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={declaracionVeracidadReceta}
+                    onChange={(e) => {
+                      setDeclaracionVeracidadReceta(e.target.checked);
+                      if (e.target.checked) setErrorValidacion('');
+                    }}
+                    className="mt-0.5 h-4 w-4 rounded-sm border-slate-300 text-amaru-copper accent-[#B85D19] cursor-pointer shrink-0"
+                    required
+                  />
+                  <span className="text-[11px] text-slate-800 dark:text-zinc-200 leading-relaxed select-none">
+                    <strong className="text-amber-900 dark:text-amber-300">
+                      Declaración de Autenticidad Documental:
+                    </strong>{' '}
+                    Declaro bajo mi responsabilidad que la receta oftalmológica adjunta es fidedigna, legítima, emitida por un profesional habilitado y tiene menos de 365 días de antigüedad. Comprendo que la adulteración de documentos clínicos o el uso fraudulento de convenios será bloqueado y auditado conforme a la normativa sanitaria vigente.
+                  </span>
+                </label>
+              )}
             </div>
           )}
 
@@ -899,13 +1075,19 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
               <button
                 type="button"
                 onClick={avanzarPaso1a2}
-                disabled={!autorizacionLey}
+                disabled={!paso1Habilitado}
                 className={`px-6 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all ${
-                  autorizacionLey
+                  paso1Habilitado
                     ? 'btn-copper cursor-pointer shadow-sm hover:scale-105 active:scale-95'
                     : 'bg-slate-200 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 border border-slate-300 dark:border-zinc-700 cursor-not-allowed opacity-60 shadow-none'
                 }`}
-                title={!autorizacionLey ? 'Debes autorizar el consentimiento legal para continuar' : undefined}
+                title={
+                  !convenioPaso1Valido
+                    ? 'Valida un código de convenio sindical vigente o cambia a Cliente Particular'
+                    : !autorizacionLey
+                    ? 'Debes autorizar el consentimiento legal para continuar'
+                    : undefined
+                }
               >
                 <span>Continuar a Validación Clínica (Paso 2)</span>
                 <ArrowRight size={14} />
@@ -916,9 +1098,19 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
               <button
                 type="button"
                 onClick={avanzarPaso2a3}
-                className="btn-copper px-6 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-2 cursor-pointer shadow-sm hover:scale-105 active:scale-95 transition-all"
+                disabled={!paso2Habilitado}
+                className={`px-6 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all ${
+                  paso2Habilitado
+                    ? 'btn-copper cursor-pointer shadow-sm hover:scale-105 active:scale-95'
+                    : 'bg-slate-200 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 border border-slate-300 dark:border-zinc-700 cursor-not-allowed opacity-60 shadow-none'
+                }`}
+                title={
+                  !paso2Habilitado
+                    ? 'Debes adjuntar el archivo de tu receta vigente y marcar la Declaración de Autenticidad Documental'
+                    : undefined
+                }
               >
-                <span>Continuar a Cotización & Pago (Paso 3)</span>
+                <span>Continuar a Cotización &amp; Pago (Paso 3)</span>
                 <ArrowRight size={14} />
               </button>
             )}
