@@ -57,6 +57,10 @@ export interface SolicitudReceta {
   codigoConvenio?: string;
   codigoConvenioEstado?: 'VIGENTE' | 'NO_APLICA';
   contactoVerificado?: boolean;
+  fechaAgenda?: string;
+  bloqueAgenda?: string;
+  tipoEvaluacionAgenda?: string;
+  observacionesAgenda?: string;
 }
 
 export const SOLICITUD_DEMO_INICIAL: SolicitudReceta = {

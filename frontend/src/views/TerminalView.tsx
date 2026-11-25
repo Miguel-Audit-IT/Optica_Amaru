@@ -169,7 +169,7 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
   const [modalidadPagoPos, setModalidadPagoPos] = useState<
     'Pago Total (100%)' | 'Pago a Mitad (50% Abono / 50% Saldo)' | 'Pago en Cuotas'
   >('Pago Total (100%)');
-  const [cuotasPos, setCuotasPos] = useState<3 | 6>(3);
+  const [cuotasPos, setCuotasPos] = useState<1 | 2 | 3 | 4 | 5 | 6>(3);
 
   const toggleFiltroPos = (f: string) => {
     setFiltrosCristal((prev) => (prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f]));
@@ -2081,20 +2081,23 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
                         )}
 
                         {modalidadPagoPos === 'Pago en Cuotas' && (
-                          <div className="p-2.5 rounded-xl bg-sky-500/10 border border-sky-500/30 flex items-center justify-between gap-2">
-                            <div className="flex gap-1.5">
-                              {([3, 6] as const).map((c) => (
+                          <div className="p-2.5 rounded-xl bg-sky-500/10 border border-sky-500/30 flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex flex-wrap items-center gap-1">
+                              <span className="text-[10px] font-bold text-sky-900 dark:text-sky-200 mr-1">
+                                Cuotas:
+                              </span>
+                              {([1, 2, 3, 4, 5, 6] as const).map((c) => (
                                 <button
                                   key={c}
                                   type="button"
                                   onClick={() => setCuotasPos(c)}
-                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer ${
+                                  className={`px-2 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition-all ${
                                     cuotasPos === c
-                                      ? 'bg-sky-600 text-white'
-                                      : 'bg-white dark:bg-zinc-800 text-slate-600'
+                                      ? 'bg-sky-600 text-white shadow-2xs'
+                                      : 'bg-white dark:bg-zinc-800 text-slate-600 dark:text-zinc-300 border border-slate-200 dark:border-zinc-700 hover:border-sky-400'
                                   }`}
                                 >
-                                  {c} cuotas
+                                  {c}
                                 </button>
                               ))}
                             </div>

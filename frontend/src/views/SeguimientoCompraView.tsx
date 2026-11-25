@@ -35,8 +35,14 @@ import {
 import { formatearRUT } from '../utils/rut';
 import { getUserInfo, isUserPatient, isUserOperator, isUserAdmin, isUserAuditor } from '../utils/auth';
 import { AutoRecetaModal } from '../components/AutoRecetaModal';
+import { ArmazonThumbnail } from '../components/ArmazonThumbnail';
 import { WhatsAppIcon } from '../components/icons/WhatsAppIcon';
-import { getSucursalActiva, registrarIngresoStock } from '../services/inventarioService';
+import {
+  getSucursalActiva,
+  registrarIngresoStock,
+  getInventario,
+  type ItemInventario,
+} from '../services/inventarioService';
 import {
   TitanioProIcon,
   AcetatoLumiereIcon,
@@ -479,6 +485,23 @@ export const SeguimientoCompraView: React.FC = () => {
 
   // ── Estados para el Portal del Paciente (Self-Service) ──────────────────────
   const [isModalRecetaOpen, setIsModalRecetaOpen] = useState<boolean>(false);
+  const [skuPreseleccionado, setSkuPreseleccionado] = useState<string | undefined>(undefined);
+  const [catalogoVitrina, setCatalogoVitrina] = useState<ItemInventario[]>(() => getInventario());
+
+  const abrirModalNuevaReceta = (sku?: string) => {
+    setSkuPreseleccionado(sku);
+    setIsModalRecetaOpen(true);
+  };
+
+  useEffect(() => {
+    const syncCatalogo = () => setCatalogoVitrina(getInventario());
+    window.addEventListener('amaru_stock_updated', syncCatalogo);
+    window.addEventListener('storage', syncCatalogo);
+    return () => {
+      window.removeEventListener('amaru_stock_updated', syncCatalogo);
+      window.removeEventListener('storage', syncCatalogo);
+    };
+  }, []);
   const [toastMensaje, setToastMensaje] = useState<string | null>(null);
   const [recetaCargadaLocal, setRecetaCargadaLocal] = useState<boolean>(false);
   const [editandoDatos, setEditandoDatos] = useState<boolean>(false);
@@ -1218,6 +1241,39 @@ export const SeguimientoCompraView: React.FC = () => {
         </div>
       )}
 
+      {/* ── CTA Principal del Paciente: Nueva Receta o Agendar Hora en Calama ── */}
+      {esPaciente && (
+        <div className="rounded-3xl p-5 sm:p-6 bg-gradient-to-r from-[#7C3306] via-[#A9460B] to-[#D96B27] text-white shadow-lg border border-amber-400/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-stagger-1">
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 rounded-2xl bg-white/15 backdrop-blur-xs border border-white/25 flex items-center justify-center shrink-0 shadow-sm">
+              <FileUp size={24} className="text-amber-100" />
+            </div>
+            <div>
+              <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-amber-200">
+                <MapPin size={11} />
+                <span>Auto-Servicio Óptico · Sucursal Calama</span>
+              </span>
+              <h2 className="text-lg sm:text-xl font-black tracking-tight text-white mt-0.5">
+                Ingresar Nueva Receta o Agendar Hora en Calama
+              </h2>
+              <p className="text-xs text-amber-100/90 mt-1 max-w-2xl leading-relaxed">
+                Sube tu receta vigente para cotizar con tu convenio sindical o agenda una evaluación visual presencial en nuestra sucursal de Calama.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => abrirModalNuevaReceta(undefined)}
+            className="px-6 py-3.5 rounded-2xl bg-white hover:bg-amber-50 text-[#8F3A08] font-black text-xs sm:text-sm uppercase tracking-wider flex items-center justify-center gap-2 shrink-0 shadow-md hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer"
+          >
+            <Plus size={18} strokeWidth={2.75} />
+            <span>Nueva Receta</span>
+            <ArrowRight size={16} />
+          </button>
+        </div>
+      )}
+
       {/* ── Módulos del Portal del Paciente (Self-Service Bento Grid Dinámico) ── */}
       {esPaciente && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 animate-stagger-1">
@@ -1227,7 +1283,7 @@ export const SeguimientoCompraView: React.FC = () => {
             <div className="lg:col-span-7 card-zenith optical-sheen rounded-3xl p-6 sm:p-7 relative overflow-hidden bg-gradient-to-br from-amber-500/[0.06] via-orange-500/[0.02] to-transparent border border-amber-500/25 dark:border-amber-500/35 shadow-md flex flex-col justify-between">
               <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-[#7C3306] via-[#B34B0C] to-[#E27230]" />
 
-              {/* Cabecera Limpia: SVG Armazón + Folio + Ciudad + Botón "+ Nueva Receta" */}
+              {/* Cabecera Limpia: SVG Armazón + Folio + Ciudad */}
               <div>
                 <div className="flex items-center justify-between gap-3 pb-4 border-b border-slate-200/60 dark:border-white/5">
                   <div className="flex items-center gap-3.5 min-w-0">
@@ -1255,15 +1311,6 @@ export const SeguimientoCompraView: React.FC = () => {
                       </div>
                     </div>
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setIsModalRecetaOpen(true)}
-                    className="px-3 py-1.5 rounded-xl bg-white dark:bg-black/40 border border-slate-200 dark:border-white/10 hover:border-amaru-copper text-amaru-copper text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 shadow-2xs hover:scale-105 active:scale-95 cursor-pointer"
-                  >
-                    <Plus size={13} />
-                    <span>+ Nueva Receta</span>
-                  </button>
                 </div>
 
                 {/* Stepper Visual de 4 Etapas (sin textos largos) */}
@@ -2684,161 +2731,118 @@ export const SeguimientoCompraView: React.FC = () => {
               </span>
             </div>
             <h3 className="text-xl font-black tracking-tight text-slate-900 dark:text-white mt-1">
-              Armazones Destacados para Montaje Inmediato
+              Catálogo Oficial de Lentes de Seguridad · Sucursal Calama
             </h3>
             <p className="text-xs text-slate-500 dark:text-zinc-400">
-              Modelos certificados en stock listos para montar con tu graduación óptica o descanso visual.
+              Modelos certificados CESMEC e ISPCH disponibles en stock para montaje con tu graduación óptica o convenio minero.
             </p>
           </div>
-          <span className="text-[11px] font-mono font-bold text-slate-400">
-            Disponibilidad Inmediata · Despacho Express
+          <span className="text-[11px] font-mono font-bold text-emerald-600 dark:text-emerald-400">
+            {catalogoVitrina.length} Modelos Oficiales · Stock Calama
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          {/* Card 1: EPP Titanio */}
-          <div className="rounded-2xl p-5 border border-slate-200/80 dark:border-zinc-800 bg-slate-50/50 dark:bg-black/20 hover:border-amaru-copper/60 transition-all flex flex-col justify-between group">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">
-                  DS 594 · ANSI Z87.1
-                </span>
-                <span className="text-xs font-mono font-bold text-slate-400">
-                  FAENA
-                </span>
-              </div>
-              <div className="h-28 rounded-xl bg-slate-200/40 dark:bg-zinc-800/40 p-2 flex items-center justify-center text-amber-600 dark:text-amber-400 group-hover:scale-105 transition-transform">
-                <TitanioProIcon className="w-full h-20" />
-              </div>
-              <div>
-                <h4 className="text-base font-extrabold text-slate-900 dark:text-white">
-                  EPP Titanio Pro
-                </h4>
-                <p className="text-[11px] text-amaru-copper font-medium mt-0.5">
-                  Línea Industrial & Alta Exigencia
-                </p>
-                <p className="text-xs text-slate-600 dark:text-zinc-400 mt-2 leading-relaxed">
-                  Montura de titanio aeroespacial con sello perimetral hermético contra partículas y protección UV 400.
-                </p>
-              </div>
-            </div>
-
-            <div className="pt-4 mt-4 border-t border-slate-100 dark:border-white/5 flex items-center justify-between gap-3">
-              <div>
-                <span className="text-[10px] text-slate-400 uppercase block font-bold">
-                  Precio Convenio
-                </span>
-                <span className="font-mono text-base font-black text-slate-900 dark:text-white">
-                  $85.000 CLP
-                </span>
-              </div>
-              <a
-                href="https://wa.me/56985860973?text=Hola,%20me%20interesa%20el%20modelo%20EPP%20Titanio%20Pro%20($85.000)%20visto%20en%20el%20Portal%20del%20Paciente"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-copper px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-xs cursor-pointer"
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {catalogoVitrina.map((item) => {
+            const stockCalama = item.stock.Calama || 0;
+            return (
+              <div
+                key={item.sku}
+                className="rounded-2xl p-5 border border-slate-200/80 dark:border-zinc-800 bg-slate-50/50 dark:bg-black/20 hover:border-amaru-copper/60 transition-all flex flex-col justify-between group"
               >
-                <WhatsAppIcon size={14} />
-                <span>Me interesa</span>
-              </a>
-            </div>
-          </div>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {item.grupo && (
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/25">
+                          {item.grupo}
+                        </span>
+                      )}
+                      {item.certificaciones?.map((cert) => (
+                        <span
+                          key={cert}
+                          className="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/25"
+                        >
+                          {cert}
+                        </span>
+                      ))}
+                    </div>
+                    <span
+                      className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${
+                        stockCalama > 0
+                          ? 'bg-sky-500/10 text-sky-700 dark:text-sky-300'
+                          : 'bg-rose-500/10 text-rose-700 dark:text-rose-300'
+                      }`}
+                    >
+                      {stockCalama > 0 ? `${stockCalama} disp.` : 'Agotado'}
+                    </span>
+                  </div>
 
-          {/* Card 2: Acetato Vintage */}
-          <div className="rounded-2xl p-5 border border-slate-200/80 dark:border-zinc-800 bg-slate-50/50 dark:bg-black/20 hover:border-amaru-copper/60 transition-all flex flex-col justify-between group">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-700 dark:text-sky-400 border border-sky-500/20">
-                  Blue-Block · Filtro Pantallas
-                </span>
-                <span className="text-xs font-mono font-bold text-slate-400">
-                  BOUTIQUE
-                </span>
-              </div>
-              <div className="h-28 rounded-xl bg-slate-200/40 dark:bg-zinc-800/40 p-2 flex items-center justify-center text-sky-600 dark:text-sky-400 group-hover:scale-105 transition-transform">
-                <AcetatoLumiereIcon className="w-full h-20" />
-              </div>
-              <div>
-                <h4 className="text-base font-extrabold text-slate-900 dark:text-white">
-                  Acetato Vintage Lumière
-                </h4>
-                <p className="text-[11px] text-sky-600 dark:text-sky-400 font-medium mt-0.5">
-                  Boutique Urbana & Trabajo Digital
-                </p>
-                <p className="text-xs text-slate-600 dark:text-zinc-400 mt-2 leading-relaxed">
-                  Acetato italiano pulido a mano con bisagra alemana reforzada y descanso visual de alta definición.
-                </p>
-              </div>
-            </div>
+                  <div className="h-36 rounded-xl bg-white p-2.5 border border-slate-200/70 flex items-center justify-center overflow-hidden group-hover:scale-[1.02] transition-transform">
+                    <ArmazonThumbnail
+                      imagenUrl={item.imagenUrl}
+                      nombre={item.nombre}
+                      categoria={item.categoria}
+                      size={48}
+                      className="max-h-32 w-full object-contain"
+                    />
+                  </div>
 
-            <div className="pt-4 mt-4 border-t border-slate-100 dark:border-white/5 flex items-center justify-between gap-3">
-              <div>
-                <span className="text-[10px] text-slate-400 uppercase block font-bold">
-                  Precio Particular
-                </span>
-                <span className="font-mono text-base font-black text-slate-900 dark:text-white">
-                  $72.000 CLP
-                </span>
-              </div>
-              <a
-                href="https://wa.me/56985860973?text=Hola,%20me%20interesa%20el%20modelo%20Acetato%20Vintage%20Lumiere%20($72.000)%20visto%20en%20el%20Portal%20del%20Paciente"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-copper px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-xs cursor-pointer"
-              >
-                <WhatsAppIcon size={14} />
-                <span>Me interesa</span>
-              </a>
-            </div>
-          </div>
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <h4 className="text-base font-extrabold text-slate-900 dark:text-white">
+                        {item.nombre}
+                      </h4>
+                      <span className="text-[10px] font-mono text-slate-400 shrink-0">
+                        {item.sku}
+                      </span>
+                    </div>
+                    {item.colores && item.colores.length > 0 && (
+                      <p className="text-[11px] text-amaru-copper font-semibold mt-0.5">
+                        {item.colores.join(' / ')} {item.material ? `· ${item.material}` : ''}
+                      </p>
+                    )}
+                    {item.proteccion && item.proteccion.length > 0 ? (
+                      <ul className="mt-2 space-y-1">
+                        {item.proteccion.map((p) => (
+                          <li
+                            key={p}
+                            className="text-xs text-slate-600 dark:text-zinc-400 flex items-center gap-1.5"
+                          >
+                            <ShieldCheck size={12} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+                            <span>{p}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-xs text-slate-600 dark:text-zinc-400 mt-2 leading-relaxed">
+                        {item.descripcion || 'Montura certificada lista para montaje óptico en Sucursal Calama.'}
+                      </p>
+                    )}
+                  </div>
+                </div>
 
-          {/* Card 3: Ultralight Flex */}
-          <div className="rounded-2xl p-5 border border-slate-200/80 dark:border-zinc-800 bg-slate-50/50 dark:bg-black/20 hover:border-amaru-copper/60 transition-all flex flex-col justify-between group">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
-                  Memoria de Forma · 12g
-                </span>
-                <span className="text-xs font-mono font-bold text-slate-400">
-                  ULTRALIGHT
-                </span>
+                <div className="pt-4 mt-4 border-t border-slate-100 dark:border-white/5 flex items-center justify-between gap-3">
+                  <div>
+                    <span className="text-[10px] text-slate-400 uppercase block font-bold">
+                      Precio Base
+                    </span>
+                    <span className="font-mono text-base font-black text-slate-900 dark:text-white">
+                      ${item.precioClp.toLocaleString('es-CL')} CLP
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => abrirModalNuevaReceta(item.sku)}
+                    className="btn-copper px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-xs hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                  >
+                    <span>Me interesa</span>
+                    <ArrowRight size={14} />
+                  </button>
+                </div>
               </div>
-              <div className="h-28 rounded-xl bg-slate-200/40 dark:bg-zinc-800/40 p-2 flex items-center justify-center text-emerald-600 dark:text-emerald-400 group-hover:scale-105 transition-transform">
-                <UltralightFlexIcon className="w-full h-20" />
-              </div>
-              <div>
-                <h4 className="text-base font-extrabold text-slate-900 dark:text-white">
-                  Ultralight Flex-Steel
-                </h4>
-                <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium mt-0.5">
-                  Confort Diario & Alta Flexibilidad
-                </p>
-                <p className="text-xs text-slate-600 dark:text-zinc-400 mt-2 leading-relaxed">
-                  Acero quirúrgico flexible hipoalergénico con memoria mecánica y plaquetas de silicona médica ergonómica.
-                </p>
-              </div>
-            </div>
-
-            <div className="pt-4 mt-4 border-t border-slate-100 dark:border-white/5 flex items-center justify-between gap-3">
-              <div>
-                <span className="text-[10px] text-slate-400 uppercase block font-bold">
-                  Precio Lanzamiento
-                </span>
-                <span className="font-mono text-base font-black text-slate-900 dark:text-white">
-                  $64.000 CLP
-                </span>
-              </div>
-              <a
-                href="https://wa.me/56985860973?text=Hola,%20me%20interesa%20el%20modelo%20Ultralight%20Flex-Steel%20($64.000)%20visto%20en%20el%20Portal%20del%20Paciente"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-copper px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-xs cursor-pointer"
-              >
-                <WhatsAppIcon size={14} />
-                <span>Me interesa</span>
-              </a>
-            </div>
-          </div>
+            );
+          })}
         </div>
       </div>
       )}
@@ -2862,8 +2866,12 @@ export const SeguimientoCompraView: React.FC = () => {
       {/* ── Modal AutoRecetaModal ── */}
       <AutoRecetaModal
         isOpen={isModalRecetaOpen}
-        onClose={() => setIsModalRecetaOpen(false)}
+        onClose={() => {
+          setIsModalRecetaOpen(false);
+          setSkuPreseleccionado(undefined);
+        }}
         rutPaciente={formatearRUT(userInfo.rut || userInfo.username)}
+        skuInicial={skuPreseleccionado}
         onRecetaEnviada={handleRecetaEnviada}
       />
 

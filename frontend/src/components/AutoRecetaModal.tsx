@@ -18,6 +18,9 @@ import {
   Check,
   ShieldCheck,
   ChevronDown,
+  Printer,
+  Clock,
+  FileCheck2,
 } from 'lucide-react';
 import {
   agregarSolicitudReceta,
@@ -45,6 +48,7 @@ interface AutoRecetaModalProps {
   isOpen: boolean;
   onClose: () => void;
   rutPaciente?: string;
+  skuInicial?: string;
   onRecetaEnviada?: (datos: SolicitudReceta) => void;
 }
 
@@ -61,6 +65,7 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
   isOpen,
   onClose,
   rutPaciente = '',
+  skuInicial,
   onRecetaEnviada,
 }) => {
   // ── Stepper: 1. Filiación ➔ 2. Clínica & Embudo ➔ 3. Cotización & Pago ─────
@@ -101,9 +106,23 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
   const [oiCilindro, setOiCilindro] = useState<string>('-0.75');
   const [oiEje, setOiEje] = useState<string>('85°');
 
+  // Agenda de Evaluación Visual en Sucursal Calama (cuando tipoReceta === 'sin_receta')
+  const hoyISO = new Date().toISOString().split('T')[0];
+  const [fechaAgenda, setFechaAgenda] = useState<string>(() => {
+    const manana = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    return manana.toISOString().split('T')[0];
+  });
+  const [bloqueAgenda, setBloqueAgenda] = useState<
+    'Mañana (09:00 - 13:00 hrs)' | 'Tarde (15:00 - 19:00 hrs)'
+  >('Mañana (09:00 - 13:00 hrs)');
+  const [tipoEvaluacionAgenda, setTipoEvaluacionAgenda] = useState<
+    'Evaluación Visual Completa' | 'Control / Renovación de Receta' | 'Evaluación para Lentes de Seguridad EPP'
+  >('Evaluación Visual Completa');
+  const [observacionesAgenda, setObservacionesAgenda] = useState<string>('');
+
   // ── PASO 3: Cotización, Opciones Ópticas, Convenio y Pago ──────────────────
   const [skuSeleccionado, setSkuSeleccionado] = useState<string>(
-    () => getInventario()[0]?.sku || 'EPP-TITAN-001'
+    () => skuInicial || getInventario()[0]?.sku || 'SEG-30-GRANATE'
   );
   const [materialCristal, setMaterialCristal] = useState<
     'Orgánico / Plástico' | 'Policarbonato' | 'Mineral / Vidrio'
@@ -118,7 +137,14 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
   const [modalidadPagoDetalle, setModalidadPagoDetalle] = useState<
     'Pago Total (100%)' | 'Pago a Mitad (50% Abono / 50% Saldo)' | 'Pago en Cuotas'
   >('Pago Total (100%)');
-  const [cuotasCantidad, setCuotasCantidad] = useState<3 | 6>(3);
+  const [cuotasCantidad, setCuotasCantidad] = useState<1 | 2 | 3 | 4 | 5 | 6>(3);
+
+  // Preseleccionar armazón si el usuario llegó desde "Me interesa" en la Vitrina
+  useEffect(() => {
+    if (isOpen && skuInicial) {
+      setSkuSeleccionado(skuInicial);
+    }
+  }, [isOpen, skuInicial]);
 
   // Sincronizar catálogo en tiempo real si se suben nuevos armazones en Inventario
   useEffect(() => {
@@ -134,6 +160,7 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
   // Estados de proceso
   const [enviando, setEnviando] = useState<boolean>(false);
   const [enviadoExito, setEnviadoExito] = useState<boolean>(false);
+  const [solicitudEnviada, setSolicitudEnviada] = useState<SolicitudReceta | null>(null);
   const [errorValidacion, setErrorValidacion] = useState<string>('');
 
   if (!isOpen) return null;
@@ -250,8 +277,9 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
   const paso1Habilitado = autorizacionLey && convenioPaso1Valido;
 
   const paso2Habilitado =
-    tipoReceta === 'sin_receta' ||
-    (Boolean(archivo) && declaracionVeracidadReceta);
+    tipoReceta === 'sin_receta'
+      ? Boolean(fechaAgenda) && Boolean(bloqueAgenda)
+      : Boolean(archivo) && declaracionVeracidadReceta;
 
   const avanzarPaso1a2 = () => {
     if (!nombreCompleto.trim()) {
@@ -277,11 +305,30 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
 
   const avanzarPaso2a3 = () => {
     if (!paso2Habilitado) {
-      setErrorValidacion('Debes adjuntar tu receta vigente y marcar la Declaración de Autenticidad Documental.');
+      setErrorValidacion(
+        tipoReceta === 'sin_receta'
+          ? 'Selecciona una fecha preferida y un bloque horario para agendar tu evaluación en Sucursal Calama.'
+          : 'Debes adjuntar tu receta vigente y marcar la Declaración de Autenticidad Documental.'
+      );
       return;
     }
     setErrorValidacion('');
     setPasoActual(3);
+  };
+
+  const handleFinalizarYCerrar = () => {
+    setEnviando(false);
+    setEnviadoExito(false);
+    setSolicitudEnviada(null);
+    setPasoActual(1);
+    setArchivo(null);
+    setArchivoPreviewUrl(undefined);
+    setDeclaracionVeracidadReceta(false);
+    setCodigoConvenio('');
+    setResultadoConvenio(null);
+    setObservacionesAgenda('');
+    setErrorValidacion('');
+    onClose();
   };
 
   const handleFinalizarSolicitud = () => {
@@ -293,7 +340,7 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
         modalidadPagoDetalle === 'Pago a Mitad (50% Abono / 50% Saldo)'
           ? `${metodoPago} · 50% Abono ($${montoAbono50.toLocaleString('es-CL')}) / 50% Saldo ($${montoSaldo50.toLocaleString('es-CL')})`
           : modalidadPagoDetalle === 'Pago en Cuotas'
-          ? `${metodoPago} · ${cuotasCantidad} cuotas de $${valorPorCuota.toLocaleString('es-CL')}`
+          ? `${metodoPago} · ${cuotasCantidad} ${cuotasCantidad === 1 ? 'cuota' : 'cuotas'} de $${valorPorCuota.toLocaleString('es-CL')}`
           : `${metodoPago} · Pago Total (100%)`;
 
       const codigoNormalizado =
@@ -301,9 +348,10 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
           ? codigoConvenio.trim().toUpperCase()
           : undefined;
 
-      const hashArchivoReceta = archivo
-        ? `sha256_${archivo.name.replace(/[^a-zA-Z0-9]/g, '')}_${archivo.size}_${archivo.lastModified.toString(16)}`
-        : undefined;
+      const hashArchivoReceta =
+        tipoReceta === 'vigente' && archivo
+          ? `sha256_${archivo.name.replace(/[^a-zA-Z0-9]/g, '')}_${archivo.size}_${archivo.lastModified.toString(16)}`
+          : undefined;
 
       const nuevaSolicitud = agregarSolicitudReceta({
         rut: rutFijo,
@@ -317,18 +365,31 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
             ? resultadoConvenio?.infoSindicato?.empresa || empresaFaena
             : undefined,
         tipoReceta,
-        archivoNombre: archivo?.name || archivoNombreSimulado,
-        archivoPesoKb: archivo ? Math.max(1, Math.round(archivo.size / 1024)) : undefined,
-        archivoPreviewUrl,
+        archivoNombre:
+          tipoReceta === 'sin_receta'
+            ? `Agenda Evaluación Visual (${fechaAgenda} · ${bloqueAgenda})`
+            : archivo?.name || archivoNombreSimulado,
+        archivoPesoKb:
+          tipoReceta === 'vigente' && archivo
+            ? Math.max(1, Math.round(archivo.size / 1024))
+            : undefined,
+        archivoPreviewUrl: tipoReceta === 'vigente' ? archivoPreviewUrl : undefined,
         hashArchivoReceta,
-        dioptriasManuales: deseaDigitar,
-        odEsfera: deseaDigitar ? odEsfera : undefined,
-        odCilindro: deseaDigitar ? odCilindro : undefined,
-        odEje: deseaDigitar ? odEje : undefined,
-        oiEsfera: deseaDigitar ? oiEsfera : undefined,
-        oiCilindro: deseaDigitar ? oiCilindro : undefined,
-        oiEje: deseaDigitar ? oiEje : undefined,
-        armazon: armazonActual?.nombre || 'Titanium Shield Pro',
+        dioptriasManuales: tipoReceta === 'vigente' ? deseaDigitar : false,
+        odEsfera: tipoReceta === 'vigente' && deseaDigitar ? odEsfera : undefined,
+        odCilindro: tipoReceta === 'vigente' && deseaDigitar ? odCilindro : undefined,
+        odEje: tipoReceta === 'vigente' && deseaDigitar ? odEje : undefined,
+        oiEsfera: tipoReceta === 'vigente' && deseaDigitar ? oiEsfera : undefined,
+        oiCilindro: tipoReceta === 'vigente' && deseaDigitar ? oiCilindro : undefined,
+        oiEje: tipoReceta === 'vigente' && deseaDigitar ? oiEje : undefined,
+        fechaAgenda: tipoReceta === 'sin_receta' ? fechaAgenda : undefined,
+        bloqueAgenda: tipoReceta === 'sin_receta' ? bloqueAgenda : undefined,
+        tipoEvaluacionAgenda: tipoReceta === 'sin_receta' ? tipoEvaluacionAgenda : undefined,
+        observacionesAgenda:
+          tipoReceta === 'sin_receta' && observacionesAgenda.trim()
+            ? observacionesAgenda.trim()
+            : undefined,
+        armazon: armazonActual?.nombre || 'SEG 30 GRANATE',
         skuArmazon: armazonActual?.sku,
         materialCristal,
         filtrosCristal,
@@ -359,21 +420,12 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
       localStorage.setItem('amaru_telefono', telefono);
       window.dispatchEvent(new Event('amaru_perfil_updated'));
 
+      setEnviando(false);
       setEnviadoExito(true);
+      setSolicitudEnviada(nuevaSolicitud);
       if (onRecetaEnviada) {
         onRecetaEnviada(nuevaSolicitud);
       }
-
-      setTimeout(() => {
-        setEnviando(false);
-        setEnviadoExito(false);
-        setPasoActual(1);
-        setArchivo(null);
-        setDeclaracionVeracidadReceta(false);
-        setCodigoConvenio('');
-        setResultadoConvenio(null);
-        onClose();
-      }, 2000);
     } catch (err: any) {
       setErrorValidacion(err.message || 'Error al enviar la solicitud óptica');
       setEnviando(false);
@@ -399,7 +451,7 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
               </h3>
             </div>
             <button
-              onClick={onClose}
+              onClick={solicitudEnviada ? handleFinalizarYCerrar : onClose}
               disabled={enviando}
               className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
             >
@@ -408,6 +460,7 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
           </div>
 
           {/* Stepper Superior: 1. Filiación ➔ 2. Clínica & Embudo ➔ 3. Cotización & Pago */}
+          {!solicitudEnviada && (
           <div className="grid grid-cols-3 gap-2 pt-2">
             {/* Paso 1 */}
             <div
@@ -477,11 +530,12 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
               <span className="truncate hidden sm:inline">3. Cotización & Pago</span>
             </div>
           </div>
+          )}
         </div>
 
-        {/* ── Cuerpo del Wizard ── */}
+        {/* ── Cuerpo del Wizard o Comprobante Visual ── */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5 text-xs">
-          {errorValidacion && (
+          {errorValidacion && !solicitudEnviada && (
             <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-700 dark:text-red-300 text-xs font-semibold flex items-center gap-2">
               <span>⚠</span>
               <span>{errorValidacion}</span>
@@ -489,9 +543,196 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
           )}
 
           {/* ══════════════════════════════════════════════════════════════════
+              COMPROBANTE VISUAL DE SOLICITUD ENVIADA
+             ══════════════════════════════════════════════════════════════════ */}
+          {solicitudEnviada && (
+            <div className="space-y-4 animate-in fade-in zoom-in-95 duration-200">
+              {/* Banner de Confirmación */}
+              <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/35 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                    <CheckCircle2 size={22} />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-300 block">
+                      Comprobante Oficial · Óptica Amaru Sucursal Calama
+                    </span>
+                    <h4 className="text-base font-black text-slate-900 dark:text-white">
+                      {solicitudEnviada.tipoReceta === 'sin_receta'
+                        ? 'Solicitud y Hora de Evaluación Agendada'
+                        : 'Solicitud de Receta Enviada a Validación Óptica'}
+                    </h4>
+                    <p className="text-[11px] text-slate-600 dark:text-zinc-400 mt-0.5">
+                      Emitido el {solicitudEnviada.fecha}
+                    </p>
+                  </div>
+                </div>
+                <div className="sm:text-right shrink-0">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400 block">
+                    Folio Generado
+                  </span>
+                  <span className="inline-block mt-0.5 px-3 py-1 rounded-xl bg-white dark:bg-black/40 border border-emerald-500/40 font-mono text-sm font-black text-emerald-800 dark:text-emerald-300">
+                    {solicitudEnviada.folio}
+                  </span>
+                </div>
+              </div>
+
+              {/* Datos del Paciente */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 space-y-2.5">
+                <div className="text-[10px] font-black uppercase tracking-wider text-amaru-copper flex items-center gap-1.5">
+                  <User size={13} />
+                  <span>Datos del Paciente</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Nombre Completo</span>
+                    <strong className="text-slate-900 dark:text-white">{solicitudEnviada.nombre}</strong>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">RUT</span>
+                    <strong className="font-mono text-slate-900 dark:text-white">{solicitudEnviada.rut}</strong>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Teléfono / WhatsApp</span>
+                    <strong className="font-mono text-slate-900 dark:text-white">
+                      {normalizarMovilCL(solicitudEnviada.telefono)}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Sucursal de Atención</span>
+                    <strong className="text-amaru-copper">Sucursal Calama</strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bloque Condicional: Receta Vigente vs Agenda de Hora */}
+              {solicitudEnviada.tipoReceta === 'sin_receta' ? (
+                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/35 space-y-2.5">
+                  <div className="text-[10px] font-black uppercase tracking-wider text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                    <Calendar size={13} />
+                    <span>Evaluación Visual Agendada · Sucursal Calama</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                    <div>
+                      <span className="text-[10px] text-slate-500 dark:text-zinc-400 block">Fecha Preferida</span>
+                      <strong className="font-mono text-slate-900 dark:text-white">
+                        {solicitudEnviada.fechaAgenda || 'Por confirmar'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 dark:text-zinc-400 block">Bloque Horario</span>
+                      <strong className="text-slate-900 dark:text-white">
+                        {solicitudEnviada.bloqueAgenda || 'Por confirmar'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-500 dark:text-zinc-400 block">Tipo de Evaluación</span>
+                      <strong className="text-slate-900 dark:text-white">
+                        {solicitudEnviada.tipoEvaluacionAgenda || 'Evaluación Visual Completa'}
+                      </strong>
+                    </div>
+                  </div>
+                  {solicitudEnviada.observacionesAgenda && (
+                    <div className="pt-2 border-t border-amber-500/20 text-[11px] text-slate-700 dark:text-zinc-300">
+                      <span className="font-bold">Observaciones: </span>
+                      {solicitudEnviada.observacionesAgenda}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="p-4 rounded-2xl bg-sky-500/10 border border-sky-500/30 space-y-2.5">
+                  <div className="text-[10px] font-black uppercase tracking-wider text-sky-800 dark:text-sky-300 flex items-center gap-1.5">
+                    <FileCheck2 size={13} />
+                    <span>Receta Oftalmológica Adjunta</span>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="font-semibold text-slate-900 dark:text-white">
+                      {solicitudEnviada.archivoNombre}
+                    </span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-800 dark:text-emerald-300">
+                      Autenticidad Declarada
+                    </span>
+                  </div>
+                  {solicitudEnviada.dioptriasManuales && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-sky-500/20 font-mono text-[11px]">
+                      <div className="p-2 rounded-lg bg-white/70 dark:bg-black/30">
+                        <strong className="text-amaru-copper">OD:</strong> Esf {solicitudEnviada.odEsfera} · Cil {solicitudEnviada.odCilindro} · Eje {solicitudEnviada.odEje}
+                      </div>
+                      <div className="p-2 rounded-lg bg-white/70 dark:bg-black/30">
+                        <strong className="text-amaru-copper">OI:</strong> Esf {solicitudEnviada.oiEsfera} · Cil {solicitudEnviada.oiCilindro} · Eje {solicitudEnviada.oiEje}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Resumen Óptico, Convenio y Financiero */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 space-y-2.5">
+                <div className="text-[10px] font-black uppercase tracking-wider text-amaru-copper flex items-center gap-1.5">
+                  <Receipt size={13} />
+                  <span>Resumen Óptico y Condiciones de Pago</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Armazón Seleccionado</span>
+                    <strong className="text-slate-900 dark:text-white">
+                      {solicitudEnviada.armazon} {solicitudEnviada.skuArmazon ? `(${solicitudEnviada.skuArmazon})` : ''}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Material y Adelgazamiento</span>
+                    <strong className="text-slate-900 dark:text-white">
+                      {solicitudEnviada.materialCristal} · {solicitudEnviada.adelgazamiento}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Filtros y Tratamientos</span>
+                    <strong className="text-slate-900 dark:text-white">
+                      {solicitudEnviada.filtrosCristal && solicitudEnviada.filtrosCristal.length > 0
+                        ? solicitudEnviada.filtrosCristal.join(', ')
+                        : 'Sin filtros adicionales'}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">Convenio Aplicado</span>
+                    <strong className="text-slate-900 dark:text-white">
+                      {solicitudEnviada.codigoConvenio
+                        ? `${solicitudEnviada.codigoConvenio} (${solicitudEnviada.empresa || 'Convenio Minero'})`
+                        : 'Cliente Particular'}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="pt-2.5 border-t border-slate-200 dark:border-white/10 space-y-1.5">
+                  {solicitudEnviada.descuentoConvenio && solicitudEnviada.descuentoConvenio > 0 ? (
+                    <div className="flex items-center justify-between text-[11px] text-emerald-700 dark:text-emerald-300 font-semibold">
+                      <span>Descuento / Cobertura Convenio:</span>
+                      <span className="font-mono">-${solicitudEnviada.descuentoConvenio.toLocaleString('es-CL')} CLP</span>
+                    </div>
+                  ) : null}
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-500 dark:text-zinc-400">Modalidad de Pago:</span>
+                    <span className="font-semibold text-slate-800 dark:text-zinc-200 text-right">
+                      {solicitudEnviada.modalidadPago}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between pt-1.5 border-t border-slate-200/70 dark:border-white/10">
+                    <span className="font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                      Total Final a Pagar
+                    </span>
+                    <span className="font-mono font-black text-base text-amaru-copper">
+                      ${solicitudEnviada.monto.toLocaleString('es-CL')} CLP
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ══════════════════════════════════════════════════════════════════
               PASO 1: FILIACIÓN Y CONTEXTO LABORAL
              ══════════════════════════════════════════════════════════════════ */}
-          {pasoActual === 1 && (
+          {!solicitudEnviada && pasoActual === 1 && (
             <div className="space-y-4 animate-in fade-in duration-200">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 {/* RUT PACIENTE - Bloqueado */}
@@ -813,12 +1054,15 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
           {/* ══════════════════════════════════════════════════════════════════
               PASO 2: CLÍNICA & EMBUDO
              ══════════════════════════════════════════════════════════════════ */}
-          {pasoActual === 2 && (
+          {!solicitudEnviada && pasoActual === 2 && (
             <div className="space-y-4 animate-in fade-in duration-200">
               {/* Selector de Condición: Vigente vs Sin Receta */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div
-                  onClick={() => setTipoReceta('vigente')}
+                  onClick={() => {
+                    setTipoReceta('vigente');
+                    setErrorValidacion('');
+                  }}
                   className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
                     tipoReceta === 'vigente'
                       ? 'bg-emerald-500/10 border-emerald-500/50 shadow-xs'
@@ -840,7 +1084,10 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
                 </div>
 
                 <div
-                  onClick={() => setTipoReceta('sin_receta')}
+                  onClick={() => {
+                    setTipoReceta('sin_receta');
+                    setErrorValidacion('');
+                  }}
                   className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
                     tipoReceta === 'sin_receta'
                       ? 'bg-amber-500/10 border-amber-500/50 shadow-xs'
@@ -857,158 +1104,263 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-1">
-                    Coordinaremos un operativo clínico en faena o agendaremos evaluación en sucursal {ciudad}.
+                    Agenda tu evaluación visual presencial en Sucursal {ciudad} sin necesidad de subir receta.
                   </p>
                 </div>
               </div>
 
-              {/* Zona Drag & Drop de Archivo */}
-              <div
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={handleDrop}
-                onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed border-slate-300 dark:border-zinc-700 hover:border-amaru-copper dark:hover:border-amaru-copper rounded-2xl p-6 text-center cursor-pointer transition-all bg-slate-50/50 dark:bg-black/20"
-              >
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileChange}
-                  accept=".jpg,.jpeg,.png,.pdf"
-                  className="hidden"
-                />
-                <div className="w-12 h-12 mx-auto rounded-2xl bg-amaru-copper/10 text-amaru-copper flex items-center justify-center mb-3">
-                  <UploadCloud size={24} />
-                </div>
-                <p className="text-xs font-bold text-slate-800 dark:text-zinc-200">
-                  {archivo ? archivo.name : 'Arrastra tu receta médica o haz clic para subir'}
-                </p>
-                <p className="text-[11px] text-slate-400 dark:text-zinc-500 mt-1">
-                  Formatos aceptados: JPG, PNG, PDF (Máx. 15 MB)
-                </p>
-              </div>
-
-              {/* Grilla Opcional de Dioptrías (OD / OI) */}
-              <div className="border border-slate-200 dark:border-white/10 rounded-2xl p-4 bg-slate-50/50 dark:bg-black/20">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-200/60 dark:border-white/5">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-slate-900 dark:text-white">
-                      Parámetros de Refracción (Opcional)
-                    </span>
+              {/* FLUJO A: RECETA VIGENTE (Subida de Archivo + Dioptrías + Declaración) */}
+              {tipoReceta === 'vigente' && (
+                <div className="space-y-4 animate-in fade-in duration-200">
+                  {/* Zona Drag & Drop de Archivo */}
+                  <div
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={handleDrop}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="border-2 border-dashed border-slate-300 dark:border-zinc-700 hover:border-amaru-copper dark:hover:border-amaru-copper rounded-2xl p-6 text-center cursor-pointer transition-all bg-slate-50/50 dark:bg-black/20"
+                  >
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={handleFileChange}
+                      accept=".jpg,.jpeg,.png,.pdf"
+                      className="hidden"
+                    />
+                    <div className="w-12 h-12 mx-auto rounded-2xl bg-amaru-copper/10 text-amaru-copper flex items-center justify-center mb-3">
+                      <UploadCloud size={24} />
+                    </div>
+                    <p className="text-xs font-bold text-slate-800 dark:text-zinc-200">
+                      {archivo ? archivo.name : 'Arrastra tu receta médica o haz clic para subir'}
+                    </p>
+                    <p className="text-[11px] text-slate-400 dark:text-zinc-500 mt-1">
+                      Formatos aceptados: JPG, PNG, PDF (Máx. 15 MB)
+                    </p>
                   </div>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <span className="text-[11px] font-semibold text-amaru-copper">Digitar dioptrías</span>
+
+                  {/* Grilla Opcional de Dioptrías (OD / OI) */}
+                  <div className="border border-slate-200 dark:border-white/10 rounded-2xl p-4 bg-slate-50/50 dark:bg-black/20">
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-200/60 dark:border-white/5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-900 dark:text-white">
+                          Parámetros de Refracción (Opcional)
+                        </span>
+                      </div>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <span className="text-[11px] font-semibold text-amaru-copper">Digitar dioptrías</span>
+                        <input
+                          type="checkbox"
+                          checked={deseaDigitar}
+                          onChange={(e) => setDeseaDigitar(e.target.checked)}
+                          className="rounded-sm border-slate-300 text-amaru-copper focus:ring-amaru-copper"
+                        />
+                      </label>
+                    </div>
+
+                    {deseaDigitar && (
+                      <div className="pt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* Ojo Derecho */}
+                        <div className="p-3 rounded-xl bg-white dark:bg-black/40 border border-slate-200/80 dark:border-white/5 space-y-2">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-amaru-copper block">
+                            Ojo Derecho (OD)
+                          </span>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div>
+                              <label className="text-[9px] uppercase font-bold text-slate-400 block">Esfera</label>
+                              <input
+                                type="text"
+                                value={odEsfera}
+                                onChange={(e) => setOdEsfera(e.target.value)}
+                                className="w-full px-2 py-1 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-white/10 rounded-lg font-mono text-center text-xs font-bold"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[9px] uppercase font-bold text-slate-400 block">Cilindro</label>
+                              <input
+                                type="text"
+                                value={odCilindro}
+                                onChange={(e) => setOdCilindro(e.target.value)}
+                                className="w-full px-2 py-1 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-white/10 rounded-lg font-mono text-center text-xs font-bold"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[9px] uppercase font-bold text-slate-400 block">Eje</label>
+                              <input
+                                type="text"
+                                value={odEje}
+                                onChange={(e) => setOdEje(e.target.value)}
+                                className="w-full px-2 py-1 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-white/10 rounded-lg font-mono text-center text-xs font-bold"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Ojo Izquierdo */}
+                        <div className="p-3 rounded-xl bg-white dark:bg-black/40 border border-slate-200/80 dark:border-white/5 space-y-2">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-amaru-copper block">
+                            Ojo Izquierdo (OI)
+                          </span>
+                          <div className="grid grid-cols-3 gap-2">
+                            <div>
+                              <label className="text-[9px] uppercase font-bold text-slate-400 block">Esfera</label>
+                              <input
+                                type="text"
+                                value={oiEsfera}
+                                onChange={(e) => setOiEsfera(e.target.value)}
+                                className="w-full px-2 py-1 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-white/10 rounded-lg font-mono text-center text-xs font-bold"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[9px] uppercase font-bold text-slate-400 block">Cilindro</label>
+                              <input
+                                type="text"
+                                value={oiCilindro}
+                                onChange={(e) => setOiCilindro(e.target.value)}
+                                className="w-full px-2 py-1 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-white/10 rounded-lg font-mono text-center text-xs font-bold"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[9px] uppercase font-bold text-slate-400 block">Eje</label>
+                              <input
+                                type="text"
+                                value={oiEje}
+                                onChange={(e) => setOiEje(e.target.value)}
+                                className="w-full px-2 py-1 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-white/10 rounded-lg font-mono text-center text-xs font-bold"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Declaración Obligatoria de Veracidad y Autenticidad Documental (solo Receta Vigente) */}
+                  <label
+                    className={`flex items-start gap-2.5 p-3.5 rounded-2xl border transition-all cursor-pointer animate-in fade-in duration-200 ${
+                      declaracionVeracidadReceta
+                        ? 'bg-emerald-500/10 border-emerald-500/40'
+                        : 'bg-amber-500/[0.08] border-amber-500/35 hover:border-amber-500/60'
+                    }`}
+                  >
                     <input
                       type="checkbox"
-                      checked={deseaDigitar}
-                      onChange={(e) => setDeseaDigitar(e.target.checked)}
-                      className="rounded-sm border-slate-300 text-amaru-copper focus:ring-amaru-copper"
+                      checked={declaracionVeracidadReceta}
+                      onChange={(e) => {
+                        setDeclaracionVeracidadReceta(e.target.checked);
+                        if (e.target.checked) setErrorValidacion('');
+                      }}
+                      className="mt-0.5 h-4 w-4 rounded-sm border-slate-300 text-amaru-copper accent-[#B85D19] cursor-pointer shrink-0"
+                      required
                     />
+                    <span className="text-[11px] text-slate-800 dark:text-zinc-200 leading-relaxed select-none">
+                      <strong className="text-amber-900 dark:text-amber-300">
+                        Declaración de Autenticidad Documental:
+                      </strong>{' '}
+                      Declaro bajo mi responsabilidad que la receta oftalmológica adjunta es fidedigna, legítima, emitida por un profesional habilitado y tiene menos de 365 días de antigüedad. Comprendo que la adulteración de documentos clínicos o el uso fraudulento de convenios será bloqueado y auditado conforme a la normativa sanitaria vigente.
+                    </span>
                   </label>
                 </div>
+              )}
 
-                {deseaDigitar && (
-                  <div className="pt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {/* Ojo Derecho */}
-                    <div className="p-3 rounded-xl bg-white dark:bg-black/40 border border-slate-200/80 dark:border-white/5 space-y-2">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-amaru-copper block">
-                        Ojo Derecho (OD)
-                      </span>
-                      <div className="grid grid-cols-3 gap-2">
-                        <div>
-                          <label className="text-[9px] uppercase font-bold text-slate-400 block">Esfera</label>
-                          <input
-                            type="text"
-                            value={odEsfera}
-                            onChange={(e) => setOdEsfera(e.target.value)}
-                            className="w-full px-2 py-1 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-white/10 rounded-lg font-mono text-center text-xs font-bold"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[9px] uppercase font-bold text-slate-400 block">Cilindro</label>
-                          <input
-                            type="text"
-                            value={odCilindro}
-                            onChange={(e) => setOdCilindro(e.target.value)}
-                            className="w-full px-2 py-1 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-white/10 rounded-lg font-mono text-center text-xs font-bold"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[9px] uppercase font-bold text-slate-400 block">Eje</label>
-                          <input
-                            type="text"
-                            value={odEje}
-                            onChange={(e) => setOdEje(e.target.value)}
-                            className="w-full px-2 py-1 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-white/10 rounded-lg font-mono text-center text-xs font-bold"
-                          />
-                        </div>
-                      </div>
+              {/* FLUJO B: SIN RECETA / VENCIDA (Agendar Hora en Sucursal Calama) */}
+              {tipoReceta === 'sin_receta' && (
+                <div className="p-4 sm:p-5 rounded-2xl bg-amber-500/[0.07] border border-amber-500/35 space-y-4 animate-in fade-in duration-200">
+                  <div className="flex items-start gap-3 pb-3 border-b border-amber-500/20">
+                    <div className="w-10 h-10 rounded-xl bg-amber-600/15 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0">
+                      <Calendar size={20} />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-black text-slate-900 dark:text-white">
+                        Agendar Hora en Sucursal Calama
+                      </h4>
+                      <p className="text-[11px] text-slate-600 dark:text-zinc-400 mt-0.5 leading-relaxed">
+                        No necesitas adjuntar receta médica ahora. Selecciona tu disponibilidad para realizar tu evaluación visual con nuestro equipo óptico en Calama y continuar pre-seleccionando tu armazón.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div>
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-700 dark:text-zinc-300 block mb-1.5">
+                        Fecha Preferida *
+                      </label>
+                      <input
+                        type="date"
+                        min={hoyISO}
+                        value={fechaAgenda}
+                        onChange={(e) => {
+                          setFechaAgenda(e.target.value);
+                          setErrorValidacion('');
+                        }}
+                        className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-[#1E1C1A] border border-slate-200 dark:border-white/10 text-xs font-mono font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amaru-copper"
+                      />
                     </div>
 
-                    {/* Ojo Izquierdo */}
-                    <div className="p-3 rounded-xl bg-white dark:bg-black/40 border border-slate-200/80 dark:border-white/5 space-y-2">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-amaru-copper block">
-                        Ojo Izquierdo (OI)
-                      </span>
-                      <div className="grid grid-cols-3 gap-2">
-                        <div>
-                          <label className="text-[9px] uppercase font-bold text-slate-400 block">Esfera</label>
-                          <input
-                            type="text"
-                            value={oiEsfera}
-                            onChange={(e) => setOiEsfera(e.target.value)}
-                            className="w-full px-2 py-1 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-white/10 rounded-lg font-mono text-center text-xs font-bold"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[9px] uppercase font-bold text-slate-400 block">Cilindro</label>
-                          <input
-                            type="text"
-                            value={oiCilindro}
-                            onChange={(e) => setOiCilindro(e.target.value)}
-                            className="w-full px-2 py-1 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-white/10 rounded-lg font-mono text-center text-xs font-bold"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[9px] uppercase font-bold text-slate-400 block">Eje</label>
-                          <input
-                            type="text"
-                            value={oiEje}
-                            onChange={(e) => setOiEje(e.target.value)}
-                            className="w-full px-2 py-1 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-white/10 rounded-lg font-mono text-center text-xs font-bold"
-                          />
-                        </div>
+                    <div>
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-700 dark:text-zinc-300 block mb-1.5">
+                        Bloque Horario *
+                      </label>
+                      <div className="grid grid-cols-1 gap-1.5">
+                        {(
+                          [
+                            'Mañana (09:00 - 13:00 hrs)',
+                            'Tarde (15:00 - 19:00 hrs)',
+                          ] as const
+                        ).map((bloque) => (
+                          <button
+                            key={bloque}
+                            type="button"
+                            onClick={() => setBloqueAgenda(bloque)}
+                            className={`px-3 py-2 rounded-xl border text-left text-[11px] font-bold flex items-center gap-2 cursor-pointer transition-all ${
+                              bloqueAgenda === bloque
+                                ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                                : 'bg-white dark:bg-[#1E1C1A] border-slate-200 dark:border-white/10 text-slate-700 dark:text-zinc-300 hover:border-amber-500/50'
+                            }`}
+                          >
+                            <Clock size={13} className="shrink-0" />
+                            <span>{bloque}</span>
+                          </button>
+                        ))}
                       </div>
                     </div>
                   </div>
-                )}
-              </div>
 
-              {/* Declaración Obligatoria de Veracidad y Autenticidad Documental (solo Receta Vigente) */}
-              {tipoReceta === 'vigente' && (
-                <label
-                  className={`flex items-start gap-2.5 p-3.5 rounded-2xl border transition-all cursor-pointer animate-in fade-in duration-200 ${
-                    declaracionVeracidadReceta
-                      ? 'bg-emerald-500/10 border-emerald-500/40'
-                      : 'bg-amber-500/[0.08] border-amber-500/35 hover:border-amber-500/60'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={declaracionVeracidadReceta}
-                    onChange={(e) => {
-                      setDeclaracionVeracidadReceta(e.target.checked);
-                      if (e.target.checked) setErrorValidacion('');
-                    }}
-                    className="mt-0.5 h-4 w-4 rounded-sm border-slate-300 text-amaru-copper accent-[#B85D19] cursor-pointer shrink-0"
-                    required
-                  />
-                  <span className="text-[11px] text-slate-800 dark:text-zinc-200 leading-relaxed select-none">
-                    <strong className="text-amber-900 dark:text-amber-300">
-                      Declaración de Autenticidad Documental:
-                    </strong>{' '}
-                    Declaro bajo mi responsabilidad que la receta oftalmológica adjunta es fidedigna, legítima, emitida por un profesional habilitado y tiene menos de 365 días de antigüedad. Comprendo que la adulteración de documentos clínicos o el uso fraudulento de convenios será bloqueado y auditado conforme a la normativa sanitaria vigente.
-                  </span>
-                </label>
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-700 dark:text-zinc-300 block mb-1.5">
+                      Tipo de Evaluación *
+                    </label>
+                    <select
+                      value={tipoEvaluacionAgenda}
+                      onChange={(e) =>
+                        setTipoEvaluacionAgenda(
+                          e.target.value as
+                            | 'Evaluación Visual Completa'
+                            | 'Control / Renovación de Receta'
+                            | 'Evaluación para Lentes de Seguridad EPP'
+                        )
+                      }
+                      className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-[#1E1C1A] border border-slate-200 dark:border-white/10 text-xs font-semibold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amaru-copper"
+                    >
+                      <option value="Evaluación Visual Completa">Evaluación Visual Completa</option>
+                      <option value="Control / Renovación de Receta">Control / Renovación de Receta</option>
+                      <option value="Evaluación para Lentes de Seguridad EPP">
+                        Evaluación para Lentes de Seguridad EPP
+                      </option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-700 dark:text-zinc-300 block mb-1.5">
+                      Observaciones o Molestias Visuales (Opcional)
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={observacionesAgenda}
+                      onChange={(e) => setObservacionesAgenda(e.target.value)}
+                      placeholder="Ej: turno minero 7x7, fatiga visual nocturna, necesito lentes de seguridad graduados..."
+                      className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[#1E1C1A] border border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-zinc-200 outline-none focus:ring-2 focus:ring-amaru-copper resize-none"
+                    />
+                  </div>
+                </div>
               )}
             </div>
           )}
@@ -1016,7 +1368,7 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
           {/* ══════════════════════════════════════════════════════════════════
               PASO 3: COTIZACIÓN REAL, OPCIONES ÓPTICAS, CONVENIO, PAGO Y GARANTÍAS
              ══════════════════════════════════════════════════════════════════ */}
-          {pasoActual === 3 && (
+          {!solicitudEnviada && pasoActual === 3 && (
             <div className="space-y-4 animate-in fade-in duration-200">
               {/* 1. Selección de Armazón del Inventario Real (Sucursal Calama) */}
               <div>
@@ -1333,24 +1685,24 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
 
                 {modalidadPagoDetalle === 'Pago en Cuotas' && (
                   <div className="p-3 rounded-xl bg-sky-500/10 border border-sky-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs animate-in fade-in">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-bold text-sky-900 dark:text-sky-200">Cuotas:</span>
-                      {([3, 6] as const).map((c) => (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[11px] font-bold text-sky-900 dark:text-sky-200 mr-1">Cuotas:</span>
+                      {([1, 2, 3, 4, 5, 6] as const).map((c) => (
                         <button
                           key={c}
                           type="button"
                           onClick={() => setCuotasCantidad(c)}
-                          className={`px-3 py-1 rounded-lg font-bold text-xs cursor-pointer transition-all ${
+                          className={`px-2.5 py-1 rounded-lg font-bold text-xs cursor-pointer transition-all ${
                             cuotasCantidad === c
                               ? 'bg-sky-600 text-white shadow-xs'
-                              : 'bg-white dark:bg-[#1E1C1A] text-slate-600 dark:text-zinc-300 border border-slate-200 dark:border-white/10'
+                              : 'bg-white dark:bg-[#1E1C1A] text-slate-600 dark:text-zinc-300 border border-slate-200 dark:border-white/10 hover:border-sky-400'
                           }`}
                         >
-                          {c} cuotas
+                          {c}
                         </button>
                       ))}
                     </div>
-                    <div className="font-mono font-black text-sky-900 dark:text-sky-200">
+                    <div className="font-mono font-black text-sky-900 dark:text-sky-200 shrink-0">
                       {cuotasCantidad}x ${valorPorCuota.toLocaleString('es-CL')} CLP/mes
                     </div>
                   </div>
@@ -1368,92 +1720,116 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
         </div>
 
         {/* ── Pie de Botones de Navegación ── */}
-        <div className="px-6 py-4 border-t border-slate-100 dark:border-white/5 bg-slate-50/80 dark:bg-black/30 flex items-center justify-between gap-3">
-          <div>
-            {pasoActual > 1 && (
+        <div className="px-6 py-4 border-t border-slate-100 dark:border-white/5 bg-slate-50/80 dark:bg-black/30 flex flex-wrap items-center justify-between gap-3">
+          {solicitudEnviada ? (
+            <>
               <button
                 type="button"
-                onClick={() => setPasoActual((p) => (p - 1) as 1 | 2)}
-                disabled={enviando}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer"
+                onClick={() => window.print()}
+                className="px-4 py-2.5 rounded-xl bg-white dark:bg-[#1E1C1A] border border-slate-300 dark:border-white/15 hover:border-amaru-copper text-slate-700 dark:text-zinc-200 text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-2xs"
               >
-                <ArrowLeft size={14} />
-                <span>Volver</span>
+                <Printer size={15} className="text-amaru-copper" />
+                <span>Imprimir / Guardar PDF</span>
               </button>
-            )}
-          </div>
-
-          <div className="flex items-center gap-3">
-            {pasoActual === 1 && (
               <button
                 type="button"
-                onClick={avanzarPaso1a2}
-                disabled={!paso1Habilitado}
-                className={`px-6 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all ${
-                  paso1Habilitado
-                    ? 'btn-copper cursor-pointer shadow-sm hover:scale-105 active:scale-95'
-                    : 'bg-slate-200 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 border border-slate-300 dark:border-zinc-700 cursor-not-allowed opacity-60 shadow-none'
-                }`}
-                title={
-                  !convenioPaso1Valido
-                    ? 'Valida un código de convenio sindical vigente o cambia a Cliente Particular'
-                    : !autorizacionLey
-                    ? 'Debes autorizar el consentimiento legal para continuar'
-                    : undefined
-                }
+                onClick={handleFinalizarYCerrar}
+                className="btn-copper px-6 py-2.5 rounded-xl font-extrabold text-xs uppercase tracking-wider flex items-center gap-2 cursor-pointer shadow-md hover:scale-105 active:scale-95 transition-all"
               >
-                <span>Continuar a Validación Clínica (Paso 2)</span>
-                <ArrowRight size={14} />
+                <CheckCircle2 size={16} />
+                <span>Finalizar y Volver a Mis Pedidos</span>
               </button>
-            )}
-
-            {pasoActual === 2 && (
-              <button
-                type="button"
-                onClick={avanzarPaso2a3}
-                disabled={!paso2Habilitado}
-                className={`px-6 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all ${
-                  paso2Habilitado
-                    ? 'btn-copper cursor-pointer shadow-sm hover:scale-105 active:scale-95'
-                    : 'bg-slate-200 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 border border-slate-300 dark:border-zinc-700 cursor-not-allowed opacity-60 shadow-none'
-                }`}
-                title={
-                  !paso2Habilitado
-                    ? 'Debes adjuntar el archivo de tu receta vigente y marcar la Declaración de Autenticidad Documental'
-                    : undefined
-                }
-              >
-                <span>Continuar a Cotización &amp; Pago (Paso 3)</span>
-                <ArrowRight size={14} />
-              </button>
-            )}
-
-            {pasoActual === 3 && (
-              <button
-                type="button"
-                onClick={handleFinalizarSolicitud}
-                disabled={enviando || enviadoExito}
-                className="btn-copper px-6 py-2.5 rounded-xl font-extrabold text-xs uppercase tracking-wider flex items-center gap-2 cursor-pointer shadow-md hover:scale-105 active:scale-95 transition-all disabled:opacity-50"
-              >
-                {enviando ? (
-                  <>
-                    <span className="inline-block animate-spin">⏳</span>
-                    <span>Procesando Pre-Ingreso...</span>
-                  </>
-                ) : enviadoExito ? (
-                  <>
-                    <CheckCircle2 size={16} className="text-white" />
-                    <span>¡Solicitud Enviada con Éxito!</span>
-                  </>
-                ) : (
-                  <>
-                    <FileUp size={16} />
-                    <span>ENVIAR SOLICITUD A VALIDACIÓN ÓPTICA</span>
-                  </>
+            </>
+          ) : (
+            <>
+              <div>
+                {pasoActual > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setPasoActual((p) => (p - 1) as 1 | 2)}
+                    disabled={enviando}
+                    className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <ArrowLeft size={14} />
+                    <span>Volver</span>
+                  </button>
                 )}
-              </button>
-            )}
-          </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                {pasoActual === 1 && (
+                  <button
+                    type="button"
+                    onClick={avanzarPaso1a2}
+                    disabled={!paso1Habilitado}
+                    className={`px-6 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all ${
+                      paso1Habilitado
+                        ? 'btn-copper cursor-pointer shadow-sm hover:scale-105 active:scale-95'
+                        : 'bg-slate-200 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 border border-slate-300 dark:border-zinc-700 cursor-not-allowed opacity-60 shadow-none'
+                    }`}
+                    title={
+                      !convenioPaso1Valido
+                        ? 'Valida un código de convenio sindical vigente o cambia a Cliente Particular'
+                        : !autorizacionLey
+                        ? 'Debes autorizar el consentimiento legal para continuar'
+                        : undefined
+                    }
+                  >
+                    <span>Continuar a Validación Clínica (Paso 2)</span>
+                    <ArrowRight size={14} />
+                  </button>
+                )}
+
+                {pasoActual === 2 && (
+                  <button
+                    type="button"
+                    onClick={avanzarPaso2a3}
+                    disabled={!paso2Habilitado}
+                    className={`px-6 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition-all ${
+                      paso2Habilitado
+                        ? 'btn-copper cursor-pointer shadow-sm hover:scale-105 active:scale-95'
+                        : 'bg-slate-200 dark:bg-zinc-800 text-slate-400 dark:text-zinc-600 border border-slate-300 dark:border-zinc-700 cursor-not-allowed opacity-60 shadow-none'
+                    }`}
+                    title={
+                      !paso2Habilitado
+                        ? tipoReceta === 'sin_receta'
+                          ? 'Selecciona fecha preferida y bloque horario para agendar en Calama'
+                          : 'Debes adjuntar el archivo de tu receta vigente y marcar la Declaración de Autenticidad Documental'
+                        : undefined
+                    }
+                  >
+                    <span>Continuar a Cotización &amp; Pago (Paso 3)</span>
+                    <ArrowRight size={14} />
+                  </button>
+                )}
+
+                {pasoActual === 3 && (
+                  <button
+                    type="button"
+                    onClick={handleFinalizarSolicitud}
+                    disabled={enviando || enviadoExito}
+                    className="btn-copper px-6 py-2.5 rounded-xl font-extrabold text-xs uppercase tracking-wider flex items-center gap-2 cursor-pointer shadow-md hover:scale-105 active:scale-95 transition-all disabled:opacity-50"
+                  >
+                    {enviando ? (
+                      <>
+                        <span className="inline-block animate-spin">⏳</span>
+                        <span>Procesando Pre-Ingreso...</span>
+                      </>
+                    ) : (
+                      <>
+                        <FileUp size={16} />
+                        <span>
+                          {tipoReceta === 'sin_receta'
+                            ? 'CONFIRMAR HORA Y PRE-COTIZACIÓN'
+                            : 'ENVIAR SOLICITUD A VALIDACIÓN ÓPTICA'}
+                        </span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>
