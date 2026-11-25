@@ -48,6 +48,11 @@ import {
 import { PoliticasGarantiaBox } from '../components/PoliticasGarantiaBox';
 import { ArmazonThumbnail } from '../components/ArmazonThumbnail';
 import {
+  extraerDigitosMovilCL,
+  formatearDigitosMovilCL,
+  normalizarMovilCL,
+} from '../utils/telefono';
+import {
   getInventario,
   getSucursalActiva,
   setSucursalActiva,
@@ -171,10 +176,8 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
   };
 
   // ── FASE 2: Convenios Institucionales, Validación Física Mesón & Candado 30 Días ──
-  const [codigoConvenio, setCodigoConvenio] = useState('SDC1326');
-  const [resultadoConvenio, setResultadoConvenio] = useState<ResultadoValidacionCodigo | null>(() =>
-    validarCodigoSindicato('SDC1326', '')
-  );
+  const [codigoConvenio, setCodigoConvenio] = useState('');
+  const [resultadoConvenio, setResultadoConvenio] = useState<ResultadoValidacionCodigo | null>(null);
   const [nroSocioMinero, setNroSocioMinero] = useState('');
   const [fePublicaVerificacion, setFePublicaVerificacion] = useState<
     'PRESENCIAL_VERIFICADO' | 'CUARENTENA_PRE_LABORATORIO'
@@ -962,24 +965,32 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
                 />
               </div>
 
-              {/* Teléfono WhatsApp y Correo */}
+              {/* Teléfono WhatsApp (+56 9 automático) y Correo */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-zinc-300 mb-1.5">
                     Teléfono Móvil / WhatsApp <span className="text-amaru-copper">*</span>
                   </label>
-                  <div className="relative">
-                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-emerald-600">
-                      <Phone size={14} />
+                  <div className="flex items-center bg-slate-50 dark:bg-black/30 border border-slate-300 dark:border-white/10 rounded-xl overflow-hidden focus-within:ring-2 focus-within:ring-amaru-copper">
+                    <span className="pl-3 pr-2.5 py-2.5 bg-slate-100 dark:bg-white/5 border-r border-slate-200 dark:border-white/10 flex items-center gap-1.5 text-xs font-mono font-bold text-slate-700 dark:text-zinc-200 select-none shrink-0">
+                      <Phone size={13} className="text-emerald-600" />
+                      <span>+56 9</span>
                     </span>
                     <input
-                      type="text"
-                      placeholder="+56 9 8586 0973"
-                      value={telefonoPaciente}
-                      onChange={(e) => setTelefonoPaciente(e.target.value)}
-                      className="w-full pl-9 pr-3.5 py-2.5 bg-slate-50 dark:bg-black/30 border border-slate-300 dark:border-white/10 rounded-xl text-sm font-mono text-slate-900 dark:text-white placeholder:text-slate-400 focus:ring-2 focus:ring-amaru-copper outline-hidden"
+                      type="tel"
+                      inputMode="numeric"
+                      maxLength={9}
+                      placeholder="8586 0973"
+                      value={formatearDigitosMovilCL(telefonoPaciente)}
+                      onChange={(e) => setTelefonoPaciente(normalizarMovilCL(e.target.value))}
+                      className="w-full px-3 py-2.5 bg-transparent text-sm font-mono text-slate-900 dark:text-white placeholder:text-slate-400 outline-hidden"
                     />
                   </div>
+                  {telefonoPaciente && extraerDigitosMovilCL(telefonoPaciente).length < 8 && (
+                    <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                      Ingresa los 8 dígitos de tu móvil (actual: {extraerDigitosMovilCL(telefonoPaciente).length}/8).
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -1094,7 +1105,7 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
                       </span>
                     </div>
 
-                    {/* Selector / Input de Código de Convenio */}
+                    {/* Input de Código de Convenio (Sin exponer atajos internos en mesón) */}
                     <div>
                       <label className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-zinc-400 block mb-1">
                         Código de Convenio Activo *
@@ -1104,28 +1115,23 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
                           type="text"
                           value={codigoConvenio}
                           onChange={(e) => handleCodigoConvenioChange(e.target.value)}
-                          placeholder="SDC1326, COL-CALAMA..."
-                          className="flex-1 bg-white dark:bg-[#1E1C1A] border border-slate-300 dark:border-white/10 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900 dark:text-white uppercase focus:ring-2 focus:ring-amaru-copper outline-hidden"
+                          onBlur={() => {
+                            if (codigoConvenio.trim()) handleCodigoConvenioChange(codigoConvenio);
+                          }}
+                          placeholder="Ingresa código entregado por sindicato o empresa"
+                          className="flex-1 bg-white dark:bg-[#1E1C1A] border border-slate-300 dark:border-white/10 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-900 dark:text-white uppercase placeholder:font-sans placeholder:normal-case placeholder:font-normal focus:ring-2 focus:ring-amaru-copper outline-hidden"
                         />
+                        <button
+                          type="button"
+                          onClick={() => handleCodigoConvenioChange(codigoConvenio)}
+                          className="px-3.5 py-2 rounded-xl bg-[#B85D19] hover:bg-[#8F3B09] text-white font-bold text-[11px] uppercase tracking-wider transition-all cursor-pointer shrink-0 shadow-xs"
+                        >
+                          Validar
+                        </button>
                       </div>
-
-                      {/* Accesos rápidos de convenios */}
-                      <div className="flex flex-wrap gap-1.5 mt-2">
-                        {['SDC1326', 'SDM0826', 'SDE1126', 'GOB-LOA26', 'COL-CALAMA', 'JJVV-NORTE'].map((c) => (
-                          <button
-                            key={c}
-                            type="button"
-                            onClick={() => handleCodigoConvenioChange(c)}
-                            className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold transition-all cursor-pointer ${
-                              codigoConvenio === c
-                                ? 'bg-amaru-copper text-white shadow-2xs'
-                                : 'bg-white/80 dark:bg-black/30 text-slate-700 dark:text-zinc-300 border border-slate-200 dark:border-white/10 hover:border-amaru-copper'
-                            }`}
-                          >
-                            {c}
-                          </button>
-                        ))}
-                      </div>
+                      <p className="text-[10px] text-slate-500 dark:text-zinc-400 mt-1">
+                        Por control interno, el catálogo de códigos se administra exclusivamente desde el panel de Administración.
+                      </p>
                     </div>
 
                     {/* Feedback y clasificación del convenio */}
