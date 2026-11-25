@@ -187,15 +187,8 @@ export const AuditoriaView: React.FC = () => {
   const [searchParams] = useSearchParams();
   const currentTab = (searchParams.get('tab') as TabAuditoria) || 'control';
 
-  // 1. Selector Global de Jurisdicción persistente
-  const [jurisdiccion, setJurisdiccion] = useState<JurisdiccionAuditor>(() => {
-    return (localStorage.getItem('amaru_auditor_jurisdiccion') as JurisdiccionAuditor) || 'TODAS';
-  });
-
-  const cambiarJurisdiccion = (jur: JurisdiccionAuditor) => {
-    setJurisdiccion(jur);
-    localStorage.setItem('amaru_auditor_jurisdiccion', jur);
-  };
+  // 1. Sede Operativa Activa: Sucursal Calama
+  const [jurisdiccion] = useState<JurisdiccionAuditor>('Calama');
 
   // Copiado de Hash
   const [hashCopiado, setHashCopiado] = useState<string | null>(null);
@@ -335,33 +328,17 @@ export const AuditoriaView: React.FC = () => {
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="space-y-1">
             <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white">
-              Panel de Control y Auditoría
+              Auditoría Inmutable SHA-256 · Administración
             </h1>
             <p className="text-xs text-zinc-300 leading-relaxed">
-              Revisión de ventas, anulaciones, inventario y cuadratura de sucursales en modo de solo lectura.
+              Trazabilidad forense de ventas, anulaciones, inventario y cuadratura consolidada para el rol Administrador en Sucursal Calama.
             </p>
           </div>
 
-          {/* Selector Rápido de Sucursal */}
-          <div className="bg-black/50 p-1.5 rounded-2xl border border-white/10 backdrop-blur-md flex items-center gap-1 shrink-0">
-            {[
-              { id: 'TODAS', label: '🌐 Ambas Sucursales' },
-              { id: 'Calama', label: '📍 Calama' },
-              { id: 'Antofagasta', label: '📍 Antofagasta' },
-            ].map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => cambiarJurisdiccion(item.id as JurisdiccionAuditor)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  jurisdiccion === item.id
-                    ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
-                    : 'text-zinc-300 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
+          {/* Indicador de Sede Activa Calama */}
+          <div className="bg-black/50 px-4 py-2 rounded-2xl border border-emerald-500/30 backdrop-blur-md flex items-center gap-2 shrink-0 text-xs font-bold text-emerald-300">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span>📍 Sucursal Calama (Sede Activa)</span>
           </div>
         </div>
       </div>
@@ -371,21 +348,21 @@ export const AuditoriaView: React.FC = () => {
       ══════════════════════════════════════════════════════════════════════════ */}
       {currentTab === 'control' && (
         <div className="space-y-6 animate-in fade-in duration-150">
-          {/* Comparativa por Sucursal (Calama vs. Antofagasta) */}
+          {/* Resumen Operativo Sucursal Calama */}
           <div className="card-zenith rounded-3xl p-6 bg-white dark:bg-[#181614] border border-slate-200/90 dark:border-white/10 shadow-sm">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-white/5 mb-5">
               <div className="flex items-center gap-2">
                 <Building2 size={18} className="text-emerald-600 dark:text-emerald-400" />
                 <h2 className="text-base font-extrabold text-slate-900 dark:text-white">
-                  Comparativa por Sucursal (Calama vs. Antofagasta)
+                  Control Operativo · Sucursal Calama
                 </h2>
               </div>
               <span className="text-[11px] font-mono font-bold text-slate-500 dark:text-zinc-400">
-                Indicadores del Mes
+                Indicadores del Mes · Escalable Multi-Sucursal
               </span>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <div className="grid grid-cols-1 gap-5">
               {/* Tarjeta Calama */}
               <div className="rounded-2xl p-5 border border-amber-500/30 bg-gradient-to-br from-amber-500/[0.04] to-transparent space-y-4">
                 <div className="flex items-center justify-between border-b border-amber-500/20 pb-3">
@@ -396,11 +373,11 @@ export const AuditoriaView: React.FC = () => {
                     </h3>
                   </div>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-900 dark:text-amber-200 font-bold">
-                    Casa Matriz
+                    Casa Matriz Activa
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
                   <div className="p-3 rounded-xl bg-white/70 dark:bg-black/30 border border-slate-200/60 dark:border-white/5">
                     <span className="text-[10px] text-slate-400 block font-semibold uppercase">Ventas del Mes</span>
                     <strong className="text-base font-mono font-black text-slate-900 dark:text-white">$16.450.000 CLP</strong>
@@ -423,44 +400,6 @@ export const AuditoriaView: React.FC = () => {
                   </div>
                 </div>
               </div>
-
-              {/* Tarjeta Antofagasta */}
-              <div className="rounded-2xl p-5 border border-blue-500/30 bg-gradient-to-br from-blue-500/[0.04] to-transparent space-y-4">
-                <div className="flex items-center justify-between border-b border-blue-500/20 pb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />
-                    <h3 className="font-bold text-slate-900 dark:text-white text-sm">
-                      Sucursal Antofagasta
-                    </h3>
-                  </div>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-900 dark:text-blue-200 font-bold">
-                    Costanera
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div className="p-3 rounded-xl bg-white/70 dark:bg-black/30 border border-slate-200/60 dark:border-white/5">
-                    <span className="text-[10px] text-slate-400 block font-semibold uppercase">Ventas del Mes</span>
-                    <strong className="text-base font-mono font-black text-slate-900 dark:text-white">$8.230.000 CLP</strong>
-                    <span className="text-[10px] text-emerald-600 block mt-0.5 font-medium">14 transacciones conformes</span>
-                  </div>
-                  <div className="p-3 rounded-xl bg-white/70 dark:bg-black/30 border border-slate-200/60 dark:border-white/5">
-                    <span className="text-[10px] text-slate-400 block font-semibold uppercase">Ventas Anuladas</span>
-                    <strong className="text-base font-mono font-black text-rose-600 dark:text-rose-400">1 caso ($145.000)</strong>
-                    <span className="text-[10px] text-slate-500 block mt-0.5 font-medium">Reversado a Kardex</span>
-                  </div>
-                  <div className="p-3 rounded-xl bg-white/70 dark:bg-black/30 border border-slate-200/60 dark:border-white/5">
-                    <span className="text-[10px] text-slate-400 block font-semibold uppercase">Recetas con Respaldo</span>
-                    <strong className="text-base font-mono font-black text-emerald-600">97.8%</strong>
-                    <span className="text-[10px] text-slate-500 block mt-0.5 font-medium">Recetas médicas validadas</span>
-                  </div>
-                  <div className="p-3 rounded-xl bg-white/70 dark:bg-black/30 border border-slate-200/60 dark:border-white/5">
-                    <span className="text-[10px] text-slate-400 block font-semibold uppercase">Alertas</span>
-                    <strong className="text-base font-mono font-black text-amber-600">1 alerta</strong>
-                    <span className="text-[10px] text-slate-500 block mt-0.5 font-medium">Tiempo biselado &gt; 48h</span>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
 
@@ -474,26 +413,26 @@ export const AuditoriaView: React.FC = () => {
                 </h2>
               </div>
               <span className="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 font-bold">
-                Gestión de Roles
+                Control Consolidado Administrador
               </span>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-              {/* Auditor Principal */}
+              {/* Administradora Principal */}
               <div className="p-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/[0.03] space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
                     <CheckCircle2 size={15} className="text-emerald-600" />
-                    Auditor Principal (Rodrigo Sanhueza · Activo)
+                    Administradora Principal (María González · Activa)
                   </span>
                   <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/20 text-emerald-800 dark:text-emerald-300">
                     EN LÍNEA
                   </span>
                 </div>
                 <div className="space-y-1 text-slate-600 dark:text-zinc-300">
-                  <p><strong>Funcionario:</strong> Rodrigo Sanhueza (RUT: 16.345.678-K)</p>
-                  <p><strong>Jurisdicción:</strong> Ambas Sucursales (Calama y Antofagasta)</p>
-                  <p><strong>Permiso Asignado:</strong> Solo Consulta (Sin edición ni anulación)</p>
+                  <p><strong>Titular:</strong> María González (Administradora General)</p>
+                  <p><strong>Sede Operativa:</strong> Sucursal Calama (Casa Matriz)</p>
+                  <p><strong>Permiso Asignado:</strong> Control Total (Auditoría SHA-256, Recetas, Convenios y Gestión)</p>
                 </div>
               </div>
 

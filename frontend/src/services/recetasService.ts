@@ -14,6 +14,8 @@ export interface SolicitudReceta {
   empresa?: string;
   tipoReceta: 'vigente' | 'sin_receta';
   archivoNombre: string;
+  archivoPesoKb?: number;
+  archivoPreviewUrl?: string;
   dioptriasManuales?: boolean;
   odEsfera?: string;
   odCilindro?: string;
@@ -29,6 +31,17 @@ export interface SolicitudReceta {
   hashArchivoReceta?: string;
   estadoRnpi?: 'RNPI_HABILITADO' | 'PENDIENTE_MESON' | 'RUT_INVALIDO' | 'NO_APLICA';
   armazon: string;
+  skuArmazon?: string;
+  materialCristal?: 'Orgánico / Plástico' | 'Policarbonato' | 'Mineral / Vidrio';
+  filtrosCristal?: string[];
+  adelgazamiento?: 'Estándar (1.56)' | 'Adelgazado (1.61)' | 'Ultra Delgado (1.67)';
+  contextoUso?: string;
+  especificacionesCliente?: string;
+  subtotalOriginal?: number;
+  descuentoConvenio?: number;
+  metodoPago?: string;
+  modalidadPagoDetalle?: 'Pago Total (100%)' | 'Pago a Mitad (50% Abono / 50% Saldo)' | 'Pago en Cuotas';
+  cuotasCantidad?: number;
   monto: number;
   modalidadPago: string;
   fecha: string;
@@ -58,6 +71,14 @@ export const SOLICITUD_DEMO_INICIAL: SolicitudReceta = {
   empresa: 'Minera Centinela · Faena Esperanza',
   tipoReceta: 'vigente',
   archivoNombre: 'Receta_Oftalmologica_2026.pdf',
+  archivoPesoKb: 428,
+  hashArchivoReceta: 'sha256_9f84b2c7e1a04d3c8812f6e59a01b7d2c4e6f8a9',
+  declaracionVeracidadReceta: true,
+  declaracionVeracidadAt: '2026-11-12T17:30:00.000Z',
+  nombreMedico: 'Dr. Felipe Andrés Araya Cortés',
+  rutMedico: '15.421.890-3',
+  centroSalud: 'Hospital del Cobre Salvador Allende - Calama',
+  fechaEmisionReceta: '2026-11-05',
   dioptriasManuales: true,
   odEsfera: '-1.50',
   odCilindro: '-0.50',

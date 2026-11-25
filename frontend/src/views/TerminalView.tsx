@@ -45,6 +45,8 @@ import {
   AcetatoLumiereIcon,
   UltralightFlexIcon,
 } from '../components/icons/ArmazonesSVGs';
+import { PoliticasGarantiaBox } from '../components/PoliticasGarantiaBox';
+import { ArmazonThumbnail } from '../components/ArmazonThumbnail';
 import {
   getInventario,
   getSucursalActiva,
@@ -148,6 +150,25 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
   const [tipoUsuario, setTipoUsuario] = useState<'Particular' | 'Convenio' | 'Isapre'>('Convenio');
   const [empresaSeleccionada, setEmpresaSeleccionada] = useState(EMPRESAS_CONVENIO[0]);
   const [autorizacionBiometrica, setAutorizacionBiometrica] = useState(false);
+
+  // ── Opciones Ópticas, Contexto de Uso y Modalidad de Pago (Parte 2) ──
+  const [materialCristal, setMaterialCristal] = useState<
+    'Orgánico / Plástico' | 'Policarbonato' | 'Mineral / Vidrio'
+  >('Policarbonato');
+  const [filtrosCristal, setFiltrosCristal] = useState<string[]>(['Filtro UV', 'Filtro Luz Azul']);
+  const [adelgazamiento, setAdelgazamiento] = useState<
+    'Estándar (1.56)' | 'Adelgazado (1.61)' | 'Ultra Delgado (1.67)'
+  >('Estándar (1.56)');
+  const [contextoUso, setContextoUso] = useState<string>('Faena minera');
+  const [especificacionesCliente, setEspecificacionesCliente] = useState<string>('');
+  const [modalidadPagoPos, setModalidadPagoPos] = useState<
+    'Pago Total (100%)' | 'Pago a Mitad (50% Abono / 50% Saldo)' | 'Pago en Cuotas'
+  >('Pago Total (100%)');
+  const [cuotasPos, setCuotasPos] = useState<3 | 6>(3);
+
+  const toggleFiltroPos = (f: string) => {
+    setFiltrosCristal((prev) => (prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f]));
+  };
 
   // ── FASE 2: Convenios Institucionales, Validación Física Mesón & Candado 30 Días ──
   const [codigoConvenio, setCodigoConvenio] = useState('SDC1326');
@@ -985,37 +1006,14 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-zinc-300 mb-1.5">
                   Sucursal de Atención / Mesón <span className="text-amaru-copper">*</span>
                 </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSucursalActivaState('Calama');
-                      setSucursalActiva('Calama');
-                    }}
-                    className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
-                      sucursalActiva === 'Calama'
-                        ? 'border-amaru-copper bg-amaru-copper/15 text-amaru-copper ring-2 ring-amaru-copper/30 shadow-xs'
-                        : 'border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20 text-slate-600 dark:text-zinc-400'
-                    }`}
-                  >
+                <div className="p-3 rounded-xl border border-amaru-copper bg-amaru-copper/15 text-amaru-copper text-xs font-bold flex items-center justify-between gap-2 shadow-xs">
+                  <span className="flex items-center gap-2">
                     <MapPin size={14} />
-                    <span>📍 Sucursal Calama</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSucursalActivaState('Antofagasta');
-                      setSucursalActiva('Antofagasta');
-                    }}
-                    className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-all ${
-                      sucursalActiva === 'Antofagasta'
-                        ? 'border-amaru-copper bg-amaru-copper/15 text-amaru-copper ring-2 ring-amaru-copper/30 shadow-xs'
-                        : 'border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/20 text-slate-600 dark:text-zinc-400'
-                    }`}
-                  >
-                    <MapPin size={14} />
-                    <span>📍 Sucursal Antofagasta</span>
-                  </button>
+                    <span>📍 Sucursal Calama (Sede Operativa Activa)</span>
+                  </span>
+                  <span className="text-[10px] font-mono bg-white/80 dark:bg-black/30 px-2 py-0.5 rounded-full">
+                    En Línea
+                  </span>
                 </div>
               </div>
 
@@ -1687,9 +1685,9 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      {catalogo.slice(0, 3).map((arm) => {
+                      {catalogo.map((arm) => {
                         const isSelected = skuSeleccionado === arm.sku;
-                        const stockActual = arm.stock[sucursalActiva] || 0;
+                        const stockActual = arm.stock.Calama || 0;
 
                         return (
                           <div
@@ -1724,18 +1722,40 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
                                 )}
                               </div>
 
-                              {/* Ilustración SVG */}
-                              <div className="py-3 flex items-center justify-center">
-                                {arm.sku === 'EPP-TITAN-001' && <TitanioProIcon size={34} className="text-amaru-copper" />}
-                                {arm.sku === 'BOUT-ACET-002' && <AcetatoLumiereIcon size={34} className="text-amaru-copper" />}
-                                {arm.sku === 'FLEX-STEEL-003' && <UltralightFlexIcon size={34} className="text-amaru-copper" />}
+                              {/* Imagen real de catálogo o fallback SVG */}
+                              <div className="p-2 flex items-center justify-center bg-white rounded-xl my-2 border border-slate-200/70 min-h-[84px]">
+                                <ArmazonThumbnail
+                                  imagenUrl={arm.imagenUrl}
+                                  nombre={arm.nombre}
+                                  categoria={arm.categoria}
+                                  size={34}
+                                  className="max-h-20"
+                                />
                               </div>
+
+                              {arm.certificaciones && arm.certificaciones.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mb-1.5">
+                                  {arm.grupo && (
+                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-800 dark:text-amber-300">
+                                      {arm.grupo}
+                                    </span>
+                                  )}
+                                  {arm.certificaciones.map((c) => (
+                                    <span
+                                      key={c}
+                                      className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                                    >
+                                      ✓ {c}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
 
                               <h5 className="text-xs font-bold text-slate-900 dark:text-white mb-1">
                                 {arm.nombre}
                               </h5>
                               <p className="text-[10px] text-slate-500 dark:text-zinc-400 line-clamp-1">
-                                {arm.material}
+                                {arm.marca ? `${arm.marca} · ` : ''}{arm.material}
                               </p>
                             </div>
 
@@ -1749,6 +1769,81 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
                         );
                       })}
                     </div>
+                  </div>
+
+                  {/* Especificaciones Ópticas y Contexto de Uso del Cliente */}
+                  <div className="p-4 rounded-2xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 space-y-3">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-amaru-copper block">
+                      Especificaciones de Cristal, Filtros y Contexto de Uso
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                      <div>
+                        <label className="text-[10px] font-bold uppercase text-slate-500 block mb-1">Material Cristal</label>
+                        <select
+                          value={materialCristal}
+                          onChange={(e) => setMaterialCristal(e.target.value as 'Orgánico / Plástico' | 'Policarbonato' | 'Mineral / Vidrio')}
+                          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[#1E1C1A] border border-slate-200 dark:border-white/10 text-xs font-semibold"
+                        >
+                          <option value="Orgánico / Plástico">Orgánico / Plástico</option>
+                          <option value="Policarbonato">Policarbonato (+$12.000)</option>
+                          <option value="Mineral / Vidrio">Mineral / Vidrio (+$15.000)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold uppercase text-slate-500 block mb-1">Adelgazamiento</label>
+                        <select
+                          value={adelgazamiento}
+                          onChange={(e) => setAdelgazamiento(e.target.value as 'Estándar (1.56)' | 'Adelgazado (1.61)' | 'Ultra Delgado (1.67)')}
+                          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[#1E1C1A] border border-slate-200 dark:border-white/10 text-xs font-semibold"
+                        >
+                          <option value="Estándar (1.56)">Estándar (1.56)</option>
+                          <option value="Adelgazado (1.61)">Adelgazado (1.61 · +$18.000)</option>
+                          <option value="Ultra Delgado (1.67)">Ultra Delgado (1.67 · +$32.000)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold uppercase text-slate-500 block mb-1">Contexto de Uso</label>
+                        <select
+                          value={contextoUso}
+                          onChange={(e) => setContextoUso(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[#1E1C1A] border border-slate-200 dark:border-white/10 text-xs font-semibold"
+                        >
+                          <option value="Faena minera">Faena minera</option>
+                          <option value="Turno nocturno">Turno nocturno</option>
+                          <option value="Pantallas / Oficina">Pantallas / Oficina</option>
+                          <option value="Conducción">Conducción</option>
+                          <option value="Lectura">Lectura</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {['Filtro UV', 'Filtro Luz Azul', 'Filtro Luz Amarilla (Conducción / Baja Luz)'].map((f) => {
+                        const on = filtrosCristal.includes(f);
+                        return (
+                          <button
+                            key={f}
+                            type="button"
+                            onClick={() => toggleFiltroPos(f)}
+                            className={`px-3 py-1.5 rounded-xl text-[11px] font-bold border transition-all cursor-pointer ${
+                              on
+                                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-800 dark:text-emerald-300'
+                                : 'bg-white dark:bg-[#1E1C1A] border-slate-200 dark:border-white/10 text-slate-500'
+                            }`}
+                          >
+                            {on ? '✓ ' : '+ '}{f}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <input
+                      type="text"
+                      value={especificacionesCliente}
+                      onChange={(e) => setEspecificacionesCliente(e.target.value)}
+                      placeholder="Especificaciones adicionales del cliente (ej: sensibilidad al reflejo nocturno, tipo de uso en faena)..."
+                      className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[#1E1C1A] border border-slate-200 dark:border-white/10 text-xs"
+                    />
                   </div>
 
                   {/* Acciones de Navegación Rama 1 */}
@@ -1877,23 +1972,139 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
                   </div>
                 </div>
 
-                {/* Desglose Convenio Institucional si aplica */}
-                {tipoUsuario === 'Convenio' && codigoConvenio && (
-                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs flex items-center justify-between">
-                    <div>
-                      <span className="font-bold text-amber-900 dark:text-amber-200 block">
-                        Convenio Activo: {codigoConvenio}
-                      </span>
-                      <span className="text-[11px] text-slate-600 dark:text-zinc-400">
-                        {calcularBeneficioConvenio(codigoConvenio, Number(montoTotal)).detalleTexto}
-                      </span>
+                {/* Desglose Convenio Institucional + Total Final */}
+                {(() => {
+                  const extraMat =
+                    materialCristal === 'Policarbonato'
+                      ? 12000
+                      : materialCristal === 'Mineral / Vidrio'
+                      ? 15000
+                      : 0;
+                  const extraFil =
+                    (filtrosCristal.includes('Filtro Luz Azul') ? 10000 : 0) +
+                    (filtrosCristal.includes('Filtro Luz Amarilla (Conducción / Baja Luz)') ? 12000 : 0);
+                  const extraIdx =
+                    adelgazamiento === 'Adelgazado (1.61)'
+                      ? 18000
+                      : adelgazamiento === 'Ultra Delgado (1.67)'
+                      ? 32000
+                      : 0;
+                  const subtotalPos = Number(montoTotal) + extraMat + extraFil + extraIdx;
+                  const convCalc =
+                    tipoUsuario === 'Convenio' && codigoConvenio && resultadoConvenio?.valido
+                      ? calcularBeneficioConvenio(codigoConvenio, subtotalPos)
+                      : null;
+                  const totalPos = convCalc ? convCalc.totalAPagarCliente : subtotalPos;
+                  const abono50 = Math.round(totalPos / 2);
+                  const saldo50 = totalPos - abono50;
+                  const cuotaVal = Math.round(totalPos / cuotasPos);
+
+                  return (
+                    <div className="space-y-2.5 text-xs">
+                      <div className="text-[11px] text-slate-600 dark:text-zinc-400 flex flex-wrap gap-2">
+                        <span><strong>Cristal:</strong> {materialCristal}</span>
+                        <span>·</span>
+                        <span><strong>Índice:</strong> {adelgazamiento}</span>
+                        <span>·</span>
+                        <span><strong>Uso:</strong> {contextoUso}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-slate-700 dark:text-zinc-300">
+                        <span>Subtotal (Armazón + Configuración Óptica):</span>
+                        <span className="font-mono font-bold">${subtotalPos.toLocaleString('es-CL')} CLP</span>
+                      </div>
+
+                      {convCalc && (
+                        <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-between">
+                          <div>
+                            <span className="font-bold text-emerald-900 dark:text-emerald-200 block">
+                              ✅ Beneficio Previo Convenio {codigoConvenio}
+                            </span>
+                            <span className="text-[11px] text-emerald-800 dark:text-emerald-300">
+                              {convCalc.detalleTexto}
+                            </span>
+                          </div>
+                          <span className="font-mono font-black text-emerald-700 dark:text-emerald-300 shrink-0">
+                            - ${convCalc.descuentoOMontoCubierto.toLocaleString('es-CL')} CLP
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-white/10">
+                        <span className="font-black text-slate-900 dark:text-white uppercase tracking-wider">
+                          Total Final a Pagar
+                        </span>
+                        <span className="font-mono font-black text-base text-amaru-copper">
+                          ${totalPos.toLocaleString('es-CL')} CLP
+                        </span>
+                      </div>
+
+                      {/* Modalidad de Pago: 100% / 50% Mitad / Cuotas */}
+                      <div className="pt-2 border-t border-slate-200 dark:border-white/10 space-y-2">
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
+                          Modalidad de Pago (Total / A Mitad 50% / A Cuotas)
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          {(
+                            [
+                              'Pago Total (100%)',
+                              'Pago a Mitad (50% Abono / 50% Saldo)',
+                              'Pago en Cuotas',
+                            ] as const
+                          ).map((mod) => (
+                            <button
+                              key={mod}
+                              type="button"
+                              onClick={() => setModalidadPagoPos(mod)}
+                              className={`p-2 rounded-xl border text-[11px] font-bold cursor-pointer transition-all ${
+                                modalidadPagoPos === mod
+                                  ? 'bg-amaru-copper/15 border-amaru-copper text-amaru-copper'
+                                  : 'bg-white dark:bg-[#1E1C1A] border-slate-200 dark:border-white/10 text-slate-600 dark:text-zinc-400'
+                              }`}
+                            >
+                              {mod}
+                            </button>
+                          ))}
+                        </div>
+
+                        {modalidadPagoPos === 'Pago a Mitad (50% Abono / 50% Saldo)' && (
+                          <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between font-mono text-[11px]">
+                            <span>Abono 50%: <strong>${abono50.toLocaleString('es-CL')}</strong></span>
+                            <span>Saldo 50%: <strong>${saldo50.toLocaleString('es-CL')}</strong></span>
+                          </div>
+                        )}
+
+                        {modalidadPagoPos === 'Pago en Cuotas' && (
+                          <div className="p-2.5 rounded-xl bg-sky-500/10 border border-sky-500/30 flex items-center justify-between gap-2">
+                            <div className="flex gap-1.5">
+                              {([3, 6] as const).map((c) => (
+                                <button
+                                  key={c}
+                                  type="button"
+                                  onClick={() => setCuotasPos(c)}
+                                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer ${
+                                    cuotasPos === c
+                                      ? 'bg-sky-600 text-white'
+                                      : 'bg-white dark:bg-zinc-800 text-slate-600'
+                                  }`}
+                                >
+                                  {c} cuotas
+                                </button>
+                              ))}
+                            </div>
+                            <span className="font-mono font-black text-sky-800 dark:text-sky-200">
+                              {cuotasPos}x ${cuotaVal.toLocaleString('es-CL')} CLP/mes
+                            </span>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <span className="px-2 py-0.5 rounded-md font-mono font-bold text-[10px] bg-amber-500/20 text-amber-900 dark:text-amber-200 uppercase">
-                      Candado 30 días al emitir
-                    </span>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
+
+              {/* Políticas de Garantía Óptica Amaru · Sucursal Calama */}
+              <PoliticasGarantiaBox compact />
 
               {/* Selector de Medio de Pago Tributario (Arqueo de Caja) */}
               <div className="space-y-3">
@@ -1909,8 +2120,8 @@ const TerminalView: React.FC<TerminalViewProps> = ({ isOnline, onSessionExpired:
                     },
                     {
                       id: 'EFECTIVO' as const,
-                      label: '💵 Efectivo en Caja Sucursal',
-                      desc: 'Pago físico con rendición en arqueo diario',
+                      label: '💵 Efectivo / Transferencia Bancaria (Calama)',
+                      desc: 'Pago físico o transferencia bancaria verificada en Sucursal Calama',
                     },
                     {
                       id: 'PLANILLA_SINDICATO' as const,

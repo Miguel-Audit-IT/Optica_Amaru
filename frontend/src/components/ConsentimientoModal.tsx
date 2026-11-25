@@ -183,7 +183,7 @@ export const ConsentimientoModal: React.FC<ConsentimientoModalProps> = ({
                   <span>Atención Presencial Disponible</span>
                 </div>
                 <p className="text-stone-400 leading-relaxed">
-                  Si prefieres no utilizar el canal digital, puedes acudir directamente a nuestras sucursales de <strong className="text-stone-200">Calama</strong> o <strong className="text-stone-200">Antofagasta</strong> para recibir atención presencial.
+                  Si prefieres no utilizar el canal digital, puedes acudir directamente a nuestra <strong className="text-stone-200">Sucursal Calama</strong> para recibir atención presencial.
                 </p>
               </div>
 

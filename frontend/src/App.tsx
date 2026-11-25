@@ -4,7 +4,6 @@ import {
   Sun,
   Moon,
   Wrench,
-  FileCheck,
   UserCheck,
   LogOut,
   UserPlus,
@@ -20,7 +19,6 @@ import {
   MapPin,
   PanelLeftClose,
   PanelLeftOpen,
-  FileText,
   Receipt,
 } from 'lucide-react';
 import { Login } from './components/Login';
@@ -32,7 +30,7 @@ import SeguimientoCompraView from './views/SeguimientoCompraView';
 import { InventarioView } from './views/InventarioView';
 import AuditoriaView from './views/AuditoriaView';
 import logoImg from './assets/logo.jpg';
-import { isUserAdmin, isUserPatient, isUserAuditor, getUserInfo } from './utils/auth';
+import { isUserAdmin, isUserPatient, getUserInfo } from './utils/auth';
 import { useTheme } from './hooks/useTheme';
 import { db } from './db/dexie';
 import { sincronizarColaOffline } from './sw/syncService';
@@ -120,11 +118,10 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
 
   const isAdmin = isUserAdmin();
   const isPatient = isUserPatient();
-  const isAuditor = isUserAuditor();
   const userInfo = getUserInfo();
   const location = useLocation();
-  const searchTab = new URLSearchParams(location.search).get('tab') || 'control';
-  const isAuditoriaPath = location.pathname.startsWith('/auditoria');
+  const searchTab = new URLSearchParams(location.search).get('tab') || 'resumen';
+  const isDashboardPath = location.pathname.startsWith('/dashboard');
 
   useEffect(() => {
     const handleSucursalUpdated = () => {
@@ -139,9 +136,9 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
   }, []);
 
   const handleToggleSucursal = () => {
-    const next = sucursalActiva === 'Calama' ? 'Antofagasta' : 'Calama';
-    setSucursalActiva(next);
-    setSucursalActivaState(next);
+    // Alcance operativo actual centrado exclusivamente en Sucursal Calama
+    setSucursalActiva('Calama');
+    setSucursalActivaState('Calama');
   };
 
   useEffect(() => {
@@ -208,7 +205,7 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
     }`;
 
   // Determinación de vendedor y nombres operativos
-  const esVendedor = !isAuditor && !isAdmin && !isPatient;
+  const esVendedor = !isAdmin && !isPatient;
   const nombreVendedorCompleto = (
     localStorage.getItem('amaru_nombre_vendedor') ||
     (userInfo.username === '17456789-2' ? 'JUANITA ARAYA' : 'CARLOS ROJAS MORALES')
@@ -255,70 +252,8 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
                 <Compass size={18} className="shrink-0" />
                 {!sidebarColapsado && <span>Mis Pedidos</span>}
               </NavLink>
-            ) : isAuditor ? (
-              /* ── Sidebar Auditor: 4 Módulos Ejecutivos de Control (Ley 20.584) ── */
-              <div className="space-y-4">
-                <div>
-                  {!sidebarColapsado ? (
-                    <div className="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
-                      Auditoría y Control
-                    </div>
-                  ) : (
-                    <div className="h-px bg-slate-200/70 dark:bg-white/10 my-2 mx-1" />
-                  )}
-                  <div className="space-y-1">
-                    <NavLink
-                      to="/auditoria?tab=control"
-                      className={`w-full ${sidebarColapsado ? 'px-2 py-3 justify-center' : 'px-4 py-3'} rounded-xl font-bold text-sm flex items-center ${sidebarColapsado ? 'justify-center' : 'gap-3'} transition-all duration-150 cursor-pointer ${
-                        isAuditoriaPath && (searchTab === 'control' || !searchTab)
-                          ? 'bg-amaru-copper text-white shadow-md shadow-orange-500/20 border-l-4 border-white'
-                          : 'text-slate-600 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.04]'
-                      }`}
-                      title="Resumen General"
-                    >
-                      <ShieldAlert size={18} className="shrink-0" />
-                      {!sidebarColapsado && <span className="truncate">Resumen General</span>}
-                    </NavLink>
-
-                    <NavLink
-                      to="/auditoria?tab=bitacora"
-                      className={`w-full ${sidebarColapsado ? 'px-2 py-3 justify-center' : 'px-4 py-3'} rounded-xl font-bold text-sm flex items-center ${sidebarColapsado ? 'justify-center' : 'gap-3'} transition-all duration-150 cursor-pointer ${
-                        isAuditoriaPath && searchTab === 'bitacora'
-                          ? 'bg-amaru-copper text-white shadow-md shadow-orange-500/20 border-l-4 border-white'
-                          : 'text-slate-600 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.04]'
-                      }`}
-                      title="Historial de Cambios"
-                    >
-                      <FileText size={18} className="shrink-0" />
-                      {!sidebarColapsado && <span className="truncate">Historial de Cambios</span>}
-                    </NavLink>
-
-                    <NavLink
-                      to="/auditoria?tab=caja"
-                      className={`w-full ${sidebarColapsado ? 'px-2 py-3 justify-center' : 'px-4 py-3'} rounded-xl font-bold text-sm flex items-center ${sidebarColapsado ? 'justify-center' : 'gap-3'} transition-all duration-150 cursor-pointer ${
-                        isAuditoriaPath && searchTab === 'caja'
-                          ? 'bg-amaru-copper text-white shadow-md shadow-orange-500/20 border-l-4 border-white'
-                          : 'text-slate-600 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.04]'
-                      }`}
-                      title="Caja y Convenios"
-                    >
-                      <Receipt size={18} className="shrink-0" />
-                      {!sidebarColapsado && <span className="truncate">Caja y Convenios</span>}
-                    </NavLink>
-
-                    <NavLink
-                      to="/inventario"
-                      className={sidebarNavLinkClass}
-                      title="Stock y Kardex"
-                    >
-                      <ShoppingBag size={18} className="shrink-0" />
-                      {!sidebarColapsado && <span className="truncate">Stock y Kardex</span>}
-                    </NavLink>
-                  </div>
-                </div>
-              </div>
             ) : isAdmin ? (
-              /* ── Sidebar Administradora: Lenguaje Directo de Dueña de Negocio ── */
+              /* ── Sidebar Administradora: Control Total Consolidado (Negocio + Convenios + Auditoría SHA-256) ── */
               <div className="space-y-4">
                 {/* 1. GESTIÓN DEL NEGOCIO */}
                 <div>
@@ -330,7 +265,13 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
                     <div className="h-px bg-slate-200/70 dark:bg-white/10 my-2 mx-1" />
                   )}
                   <div className="space-y-1">
-                    <NavLink to="/dashboard" className={sidebarNavLinkClass} title="Resumen del Negocio">
+                    <NavLink
+                      to="/dashboard"
+                      className={() =>
+                        sidebarNavLinkClass({ isActive: isDashboardPath && searchTab !== 'convenios' })
+                      }
+                      title="Resumen del Negocio"
+                    >
                       <BarChart3 size={18} className="shrink-0" />
                       {!sidebarColapsado && (
                         <>
@@ -341,6 +282,20 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
                           </span>
                         </>
                       )}
+                    </NavLink>
+                    <NavLink
+                      to="/dashboard?tab=convenios"
+                      className={() =>
+                        sidebarNavLinkClass({ isActive: isDashboardPath && searchTab === 'convenios' })
+                      }
+                      title="Convenios Sindicales"
+                    >
+                      <Receipt size={18} className="shrink-0" />
+                      {!sidebarColapsado && <span>Convenios Sindicales</span>}
+                    </NavLink>
+                    <NavLink to="/auditoria" className={sidebarNavLinkClass} title="Auditoría SHA-256">
+                      <ShieldAlert size={18} className="shrink-0" />
+                      {!sidebarColapsado && <span>Auditoría SHA-256</span>}
                     </NavLink>
                     <NavLink to="/inventario" className={sidebarNavLinkClass} title="Inventario y Ganancias">
                       <ShoppingBag size={18} className="shrink-0" />
@@ -400,13 +355,12 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
 
         {/* Pie del Sidebar */}
         <div className="pt-4 mt-4 border-t border-slate-200/70 dark:border-white/10 space-y-2.5">
-          {/* Selector de Sucursal Activa */}
-          {!isPatient && !isAuditor && (
-            <button
-              type="button"
+          {/* Indicador de Sucursal Activa (Calama) */}
+          {!isPatient && (
+            <div
               onClick={handleToggleSucursal}
-              className={`w-full flex items-center ${sidebarColapsado ? 'justify-center p-2.5' : 'justify-between px-3.5 py-2.5'} rounded-xl text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/30 transition-all cursor-pointer shadow-2xs hover:scale-[1.02] active:scale-[0.98]`}
-              title={`Sucursal Activa: ${sucursalActiva} (Click para alternar)`}
+              className={`w-full flex items-center ${sidebarColapsado ? 'justify-center p-2.5' : 'justify-between px-3.5 py-2.5'} rounded-xl text-xs font-bold bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-500/30 shadow-2xs`}
+              title="Sucursal Operativa Activa: Calama (arquitectura escalable multi-sucursal)"
             >
               <div className="flex items-center gap-2">
                 <MapPin size={14} className="text-amaru-copper shrink-0" />
@@ -414,15 +368,14 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
               </div>
               {!sidebarColapsado && (
                 <span className="bg-amber-500/20 dark:bg-amber-500/30 px-2 py-0.5 rounded-md font-mono">
-                  {sucursalActiva}
+                  Calama
                 </span>
               )}
-            </button>
+            </div>
           )}
 
           {/* Widget de Estado de Red / Sincronización */}
-          {!isAuditor && (
-            <div className="relative">
+          <div className="relative">
               <button
                 type="button"
                 onClick={() => setPopoverSincronizacionOpen(!popoverSincronizacionOpen)}
@@ -540,7 +493,6 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
                 </div>
               )}
             </div>
-          )}
 
           {/* Botón Cerrar Sesión */}
           <button
@@ -574,25 +526,11 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
                   {(localStorage.getItem('amaru_nombre_admin') || 'MARÍA GONZÁLEZ').toUpperCase()} (ADMINISTRADORA)
                 </span>
               </div>
-            ) : isPatient ? (
+            ) : (
               <div className="px-4 sm:px-5 py-2 rounded-2xl bg-emerald-600 text-white border border-emerald-500 shadow-md shadow-emerald-600/30 flex items-center gap-2.5">
                 <UserCheck size={18} className="text-white shrink-0" />
                 <span className="text-base sm:text-lg font-black tracking-tight uppercase">
                   {(nombrePaciente || 'MIGUEL JORGE').toUpperCase()} · PACIENTE
-                </span>
-              </div>
-            ) : isAuditor ? (
-              <div className="px-4 sm:px-5 py-2 rounded-2xl bg-slate-900 dark:bg-black text-white border border-slate-700 shadow-md shadow-slate-900/40 flex items-center gap-2.5">
-                <ShieldCheck size={18} className="text-emerald-400 shrink-0" />
-                <span className="text-base sm:text-lg font-black tracking-tight uppercase">
-                  RODRIGO SANHUEZA (AUDITOR)
-                </span>
-              </div>
-            ) : (
-              <div className="px-4 sm:px-5 py-2 rounded-2xl bg-slate-700 text-white border border-slate-600 shadow-md shadow-slate-700/30 flex items-center gap-2.5">
-                <FileCheck size={18} className="text-white shrink-0" />
-                <span className="text-base sm:text-lg font-black tracking-tight uppercase">
-                  RODRIGO SANHUEZA (AUDITOR)
                 </span>
               </div>
             )}
@@ -606,11 +544,7 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
 
           {/* Controles de la Barra Superior */}
           <div className="flex items-center gap-3 self-end sm:self-auto">
-            {isAuditor ? (
-              <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 rounded-xl text-xs font-bold bg-slate-900 dark:bg-black text-slate-200 border border-slate-700 shadow-inner">
-                <span className="tracking-wide">🛡️ Vista Global · Solo Consulta</span>
-              </div>
-            ) : !isPatient && (
+            {!isPatient && (
               <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-500/30">
                 <MapPin size={13} className="text-amaru-copper shrink-0" />
                 <span>📍 Sucursal {sucursalActiva}</span>
@@ -656,7 +590,7 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
             path="/"
             element={
               <Navigate
-                to={isPatient ? "/seguimiento" : isAuditor ? "/auditoria" : isAdmin ? "/dashboard" : "/terminal"}
+                to={isPatient ? "/seguimiento" : isAdmin ? "/dashboard" : "/terminal"}
                 replace
               />
             }
@@ -666,8 +600,6 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
             element={
               isPatient ? (
                 <Navigate to="/seguimiento" replace />
-              ) : isAuditor ? (
-                <Navigate to="/auditoria" replace />
               ) : (
                 <TerminalView isOnline={isOnline} onSessionExpired={handleLogout} />
               )
@@ -688,29 +620,18 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
             element={
               isPatient ? (
                 <Navigate to="/seguimiento" replace />
-              ) : isAuditor ? (
-                <Navigate to="/auditoria" replace />
               ) : (
                 <EntregaView isOnline={isOnline} onSessionExpired={handleLogout} />
               )
             }
           />
-          <Route
-            path="/seguimiento"
-            element={
-              isAuditor ? (
-                <Navigate to="/auditoria" replace />
-              ) : (
-                <SeguimientoCompraView />
-              )
-            }
-          />
+          <Route path="/seguimiento" element={<SeguimientoCompraView />} />
           <Route
             path="/dashboard"
             element={
               <ProtectedRoute
                 isAllowed={isAdmin}
-                redirectPath={isAuditor ? "/auditoria" : "/seguimiento"}
+                redirectPath="/seguimiento"
                 onUnauthorized={() =>
                   setAlertaRestringida(
                     'Acceso restringido: Se requieren privilegios de Administrador para acceder al Dashboard Gerencial.'
@@ -725,11 +646,11 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
             path="/auditoria"
             element={
               <ProtectedRoute
-                isAllowed={isAuditor || isAdmin}
+                isAllowed={isAdmin}
                 redirectPath="/seguimiento"
                 onUnauthorized={() =>
                   setAlertaRestringida(
-                    'Acceso restringido: Se requieren credenciales de Auditoría Forense ISO 27001 para acceder a este módulo.'
+                    'Acceso restringido: La Auditoría Inmutable SHA-256 es exclusiva del rol Administrador.'
                   )
                 }
               >
@@ -738,12 +659,12 @@ function AppLayout({ isOnline, onLogout }: AppLayoutProps) {
             }
           />
           <Route path="/qr" element={<PublicQRView />} />
-          {/* Catch-all → seguimiento si es paciente, auditoria si es auditor, dashboard si es admin, sino terminal */}
+          {/* Catch-all → seguimiento si es paciente, dashboard si es admin, sino terminal */}
           <Route
             path="*"
             element={
               <Navigate
-                to={isPatient ? "/seguimiento" : isAuditor ? "/auditoria" : isAdmin ? "/dashboard" : "/terminal"}
+                to={isPatient ? "/seguimiento" : isAdmin ? "/dashboard" : "/terminal"}
                 replace
               />
             }

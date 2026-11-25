@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   UploadCloud,
   X,
@@ -19,7 +19,6 @@ import {
   ShieldCheck,
   ChevronDown,
 } from 'lucide-react';
-import { TitanioProIcon, AcetatoLumiereIcon, UltralightFlexIcon } from './icons/ArmazonesSVGs';
 import {
   agregarSolicitudReceta,
   type CiudadAtencion,
@@ -28,8 +27,12 @@ import {
 } from '../services/recetasService';
 import {
   validarCodigoSindicato,
+  calcularBeneficioConvenio,
   type ResultadoValidacionCodigo,
 } from '../services/convenioSindicatoService';
+import { getInventario, type ItemInventario } from '../services/inventarioService';
+import { PoliticasGarantiaBox } from './PoliticasGarantiaBox';
+import { ArmazonThumbnail } from './ArmazonThumbnail';
 
 export type ModeloInteresEnum = 'Titanium Shield Pro' | 'Acetato Vintage Lumière' | 'Ultralight Flex-Steel';
 
@@ -63,7 +66,8 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
   const [correoFijo] = useState<string>(() => localStorage.getItem('amaru_email') || 'm.jorge@minera-norte.cl');
   const [nombreCompleto, setNombreCompleto] = useState<string>(() => localStorage.getItem('amaru_nombre_paciente') || 'Miguel Jorge Valenzuela');
   const [telefono, setTelefono] = useState<string>(() => localStorage.getItem('amaru_telefono') || '+56 9 8586 0973');
-  const [ciudad, setCiudad] = useState<CiudadAtencion>(() => (localStorage.getItem('amaru_ciudad') as CiudadAtencion) || 'Calama');
+  const [ciudad] = useState<CiudadAtencion>('Calama');
+  const [catalogoInventario, setCatalogoInventario] = useState<ItemInventario[]>(() => getInventario());
   const [tipoUsuario, setTipoUsuario] = useState<TipoUsuario>('Convenio Minero');
   const [empresaFaena, setEmpresaFaena] = useState<string>(EMPRESAS_CONVENIO_DEFAULT[0]);
   const [codigoConvenio, setCodigoConvenio] = useState<string>('');
@@ -75,6 +79,7 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
   // ── PASO 2: Clínica & Embudo ───────────────────────────────────────────────
   const [tipoReceta, setTipoReceta] = useState<'vigente' | 'sin_receta'>('vigente');
   const [archivo, setArchivo] = useState<File | null>(null);
+  const [archivoPreviewUrl, setArchivoPreviewUrl] = useState<string | undefined>(undefined);
   const [archivoNombreSimulado, setArchivoNombreSimulado] = useState<string>('Receta_Medica_Vigente_2026.pdf');
   const [declaracionVeracidadReceta, setDeclaracionVeracidadReceta] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -87,8 +92,35 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
   const [oiCilindro, setOiCilindro] = useState<string>('-0.75');
   const [oiEje, setOiEje] = useState<string>('85°');
 
-  // ── PASO 3: Cotización & Pago ──────────────────────────────────────────────
-  const [armazonSeleccionado, setArmazonSeleccionado] = useState<ModeloInteresEnum>('Titanium Shield Pro');
+  // ── PASO 3: Cotización, Opciones Ópticas, Convenio y Pago ──────────────────
+  const [skuSeleccionado, setSkuSeleccionado] = useState<string>(
+    () => getInventario()[0]?.sku || 'EPP-TITAN-001'
+  );
+  const [materialCristal, setMaterialCristal] = useState<
+    'Orgánico / Plástico' | 'Policarbonato' | 'Mineral / Vidrio'
+  >('Policarbonato');
+  const [filtrosCristal, setFiltrosCristal] = useState<string[]>(['Filtro UV', 'Filtro Luz Azul']);
+  const [adelgazamiento, setAdelgazamiento] = useState<
+    'Estándar (1.56)' | 'Adelgazado (1.61)' | 'Ultra Delgado (1.67)'
+  >('Estándar (1.56)');
+  const [contextoUso, setContextoUso] = useState<string>('Faena minera');
+  const [especificacionesCliente, setEspecificacionesCliente] = useState<string>('');
+  const [metodoPago, setMetodoPago] = useState<string>('Descuento por Planilla / Convenio');
+  const [modalidadPagoDetalle, setModalidadPagoDetalle] = useState<
+    'Pago Total (100%)' | 'Pago a Mitad (50% Abono / 50% Saldo)' | 'Pago en Cuotas'
+  >('Pago Total (100%)');
+  const [cuotasCantidad, setCuotasCantidad] = useState<3 | 6>(3);
+
+  // Sincronizar catálogo en tiempo real si se suben nuevos armazones en Inventario
+  useEffect(() => {
+    const onStockUpdate = () => setCatalogoInventario(getInventario());
+    window.addEventListener('amaru_stock_updated', onStockUpdate);
+    window.addEventListener('storage', onStockUpdate);
+    return () => {
+      window.removeEventListener('amaru_stock_updated', onStockUpdate);
+      window.removeEventListener('storage', onStockUpdate);
+    };
+  }, []);
 
   // Estados de proceso
   const [enviando, setEnviando] = useState<boolean>(false);
@@ -97,16 +129,62 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
 
   if (!isOpen) return null;
 
-  const getPrecioArmazon = (modelo: ModeloInteresEnum): number => {
-    switch (modelo) {
-      case 'Titanium Shield Pro':
-        return 85000;
-      case 'Acetato Vintage Lumière':
-        return 72000;
-      case 'Ultralight Flex-Steel':
-        return 64000;
-      default:
-        return 85000;
+  const armazonActual =
+    catalogoInventario.find((i) => i.sku === skuSeleccionado) || catalogoInventario[0];
+
+  const toggleFiltro = (filtro: string) => {
+    setFiltrosCristal((prev) =>
+      prev.includes(filtro) ? prev.filter((f) => f !== filtro) : [...prev, filtro]
+    );
+  };
+
+  // Cálculo de recargos ópticos + subtotal + beneficio previo de convenio
+  const extraMaterial =
+    materialCristal === 'Policarbonato'
+      ? 12000
+      : materialCristal === 'Mineral / Vidrio'
+      ? 15000
+      : 0;
+  const extraFiltros =
+    (filtrosCristal.includes('Filtro Luz Azul') ? 10000 : 0) +
+    (filtrosCristal.includes('Filtro Luz Amarilla (Conducción / Baja Luz)') ? 12000 : 0);
+  const extraAdelgazamiento =
+    adelgazamiento === 'Adelgazado (1.61)'
+      ? 18000
+      : adelgazamiento === 'Ultra Delgado (1.67)'
+      ? 32000
+      : 0;
+
+  const precioArmazonBase = armazonActual?.precioClp || 85000;
+  const subtotalCotizacion = precioArmazonBase + extraMaterial + extraFiltros + extraAdelgazamiento;
+  const tieneConvenioVigente =
+    tipoUsuario === 'Convenio Minero' &&
+    Boolean(codigoConvenio.trim()) &&
+    Boolean(resultadoConvenio?.valido) &&
+    !resultadoConvenio?.bloqueado;
+
+  const beneficioConvenio = tieneConvenioVigente
+    ? calcularBeneficioConvenio(codigoConvenio.trim().toUpperCase(), subtotalCotizacion)
+    : null;
+  const descuentoOCobertura = beneficioConvenio ? beneficioConvenio.descuentoOMontoCubierto : 0;
+  const totalFinalAPagar = beneficioConvenio
+    ? beneficioConvenio.totalAPagarCliente
+    : subtotalCotizacion;
+  const montoAbono50 = Math.round(totalFinalAPagar / 2);
+  const montoSaldo50 = totalFinalAPagar - montoAbono50;
+  const valorPorCuota = Math.round(totalFinalAPagar / cuotasCantidad);
+
+  const cargarPreviewArchivo = (f: File) => {
+    if (f.size <= 2 * 1024 * 1024 && (f.type.startsWith('image/') || f.type === 'application/pdf')) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          setArchivoPreviewUrl(reader.result);
+        }
+      };
+      reader.readAsDataURL(f);
+    } else {
+      setArchivoPreviewUrl(undefined);
     }
   };
 
@@ -120,6 +198,7 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
       setErrorValidacion('');
       setArchivo(f);
       setArchivoNombreSimulado(f.name);
+      cargarPreviewArchivo(f);
     }
   };
 
@@ -134,6 +213,7 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
       setErrorValidacion('');
       setArchivo(f);
       setArchivoNombreSimulado(f.name);
+      cargarPreviewArchivo(f);
     }
   };
 
@@ -200,11 +280,12 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
     setErrorValidacion('');
 
     try {
-      const montoTotal = getPrecioArmazon(armazonSeleccionado);
-      const modalidadPago =
-        tipoUsuario === 'Convenio Minero'
-          ? 'Descuento por Planilla en Convenio (3 cuotas sin interés)'
-          : 'Pago Particular Webpay Plus / Transferencia';
+      const resumenModalidad =
+        modalidadPagoDetalle === 'Pago a Mitad (50% Abono / 50% Saldo)'
+          ? `${metodoPago} · 50% Abono ($${montoAbono50.toLocaleString('es-CL')}) / 50% Saldo ($${montoSaldo50.toLocaleString('es-CL')})`
+          : modalidadPagoDetalle === 'Pago en Cuotas'
+          ? `${metodoPago} · ${cuotasCantidad} cuotas de $${valorPorCuota.toLocaleString('es-CL')}`
+          : `${metodoPago} · Pago Total (100%)`;
 
       const codigoNormalizado =
         tipoUsuario === 'Convenio Minero' && codigoConvenio.trim()
@@ -220,7 +301,7 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
         nombre: nombreCompleto.trim(),
         correo: correoFijo,
         telefono,
-        ciudad,
+        ciudad: 'Calama',
         tipoUsuario,
         empresa:
           tipoUsuario === 'Convenio Minero'
@@ -228,6 +309,8 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
             : undefined,
         tipoReceta,
         archivoNombre: archivo?.name || archivoNombreSimulado,
+        archivoPesoKb: archivo ? Math.max(1, Math.round(archivo.size / 1024)) : undefined,
+        archivoPreviewUrl,
         hashArchivoReceta,
         dioptriasManuales: deseaDigitar,
         odEsfera: deseaDigitar ? odEsfera : undefined,
@@ -236,9 +319,20 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
         oiEsfera: deseaDigitar ? oiEsfera : undefined,
         oiCilindro: deseaDigitar ? oiCilindro : undefined,
         oiEje: deseaDigitar ? oiEje : undefined,
-        armazon: armazonSeleccionado,
-        monto: montoTotal,
-        modalidadPago,
+        armazon: armazonActual?.nombre || 'Titanium Shield Pro',
+        skuArmazon: armazonActual?.sku,
+        materialCristal,
+        filtrosCristal,
+        adelgazamiento,
+        contextoUso,
+        especificacionesCliente: especificacionesCliente.trim() || undefined,
+        subtotalOriginal: subtotalCotizacion,
+        descuentoConvenio: descuentoOCobertura,
+        metodoPago,
+        modalidadPagoDetalle,
+        cuotasCantidad: modalidadPagoDetalle === 'Pago en Cuotas' ? cuotasCantidad : undefined,
+        monto: totalFinalAPagar,
+        modalidadPago: resumenModalidad,
         origen: 'PORTAL_PACIENTE',
         consentimientoLey21719: true,
         codigoConvenio: codigoNormalizado,
@@ -466,36 +560,19 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
                   </div>
                 </div>
 
-                {/* CIUDAD / SUCURSAL * (SOLO Calama y Antofagasta) */}
+                {/* SEDE OPERATIVA ACTIVA: SUCURSAL CALAMA */}
                 <div>
                   <label className="text-[10px] font-bold uppercase tracking-wider text-slate-700 dark:text-zinc-300 block mb-1">
-                    Ciudad de Atención / Sucursal *
+                    Sucursal de Atención *
                   </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setCiudad('Calama')}
-                      className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                        ciudad === 'Calama'
-                          ? 'bg-amaru-copper/15 border-amaru-copper text-amaru-copper shadow-xs'
-                          : 'bg-slate-50 dark:bg-black/30 border-slate-200 dark:border-white/10 text-slate-600 dark:text-zinc-400'
-                      }`}
-                    >
+                  <div className="py-2 px-3 rounded-xl border bg-amaru-copper/15 border-amaru-copper text-amaru-copper text-xs font-bold flex items-center justify-between gap-1.5 shadow-xs">
+                    <span className="flex items-center gap-1.5">
                       <MapPin size={13} />
-                      <span>Calama</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCiudad('Antofagasta')}
-                      className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                        ciudad === 'Antofagasta'
-                          ? 'bg-amaru-copper/15 border-amaru-copper text-amaru-copper shadow-xs'
-                          : 'bg-slate-50 dark:bg-black/30 border-slate-200 dark:border-white/10 text-slate-600 dark:text-zinc-400'
-                      }`}
-                    >
-                      <MapPin size={13} />
-                      <span>Antofagasta</span>
-                    </button>
+                      <span>Sucursal Calama</span>
+                    </span>
+                    <span className="text-[10px] font-mono bg-white/80 dark:bg-black/30 px-2 py-0.5 rounded-full">
+                      Sede Activa
+                    </span>
                   </div>
                 </div>
               </div>
@@ -925,131 +1002,355 @@ export const AutoRecetaModal: React.FC<AutoRecetaModalProps> = ({
           )}
 
           {/* ══════════════════════════════════════════════════════════════════
-              PASO 3: COTIZACIÓN & PAGO
+              PASO 3: COTIZACIÓN REAL, OPCIONES ÓPTICAS, CONVENIO, PAGO Y GARANTÍAS
              ══════════════════════════════════════════════════════════════════ */}
           {pasoActual === 3 && (
             <div className="space-y-4 animate-in fade-in duration-200">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-700 dark:text-zinc-300 block mb-1">
-                Selecciona tu Armazón de Interés *
-              </label>
+              {/* 1. Selección de Armazón del Inventario Real (Sucursal Calama) */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-700 dark:text-zinc-300">
+                    1. Selecciona tu Armazón (Catálogo Real · Sucursal Calama) *
+                  </label>
+                  <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 font-bold">
+                    {catalogoInventario.length} modelos en catálogo
+                  </span>
+                </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {/* 1. Titanium Shield Pro */}
-                <div
-                  onClick={() => setArmazonSeleccionado('Titanium Shield Pro')}
-                  className={`p-3.5 rounded-2xl border cursor-pointer transition-all flex flex-col justify-between ${
-                    armazonSeleccionado === 'Titanium Shield Pro'
-                      ? 'bg-amber-500/10 border-amber-500 shadow-md ring-2 ring-amber-500/20'
-                      : 'bg-slate-50 dark:bg-black/20 border-slate-200 dark:border-white/10'
-                  }`}
-                >
-                  <div>
-                    <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-800 dark:text-amber-300">
-                      DS 594 · FAENA
-                    </span>
-                    <div className="h-16 flex items-center justify-center my-2 text-amber-600 dark:text-amber-400">
-                      <TitanioProIcon className="w-full h-full" />
-                    </div>
-                    <h5 className="font-extrabold text-slate-900 dark:text-white text-xs">
-                      Titanium Shield Pro
-                    </h5>
-                    <p className="text-[10px] text-slate-500 dark:text-zinc-400 mt-0.5">
-                      Sello hermético industrial & titanio aeroespacial.
-                    </p>
-                  </div>
-                  <div className="pt-2 mt-2 border-t border-slate-200/50 dark:border-white/5 font-mono font-black text-slate-900 dark:text-white">
-                    $85.000 CLP
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 max-h-56 overflow-y-auto pr-1">
+                  {catalogoInventario.map((item) => {
+                    const isSelected = skuSeleccionado === item.sku;
+                    const stockCalama = item.stock.Calama || 0;
+                    return (
+                      <div
+                        key={item.sku}
+                        onClick={() => setSkuSeleccionado(item.sku)}
+                        className={`p-3 rounded-2xl border cursor-pointer transition-all flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-amber-500/10 border-amber-500 shadow-md ring-2 ring-amber-500/20'
+                            : 'bg-slate-50 dark:bg-black/20 border-slate-200 dark:border-white/10 hover:border-slate-300'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between gap-1 mb-1">
+                            <span className="text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-800 dark:text-amber-300 truncate">
+                              {item.sku}
+                            </span>
+                            <span
+                              className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${
+                                stockCalama > 0
+                                  ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                                  : 'bg-rose-500/15 text-rose-700 dark:text-rose-300'
+                              }`}
+                            >
+                              {stockCalama > 0 ? `${stockCalama} disp.` : 'Agotado'}
+                            </span>
+                          </div>
+                          <div className="h-20 flex items-center justify-center my-1.5 bg-white rounded-xl p-1 border border-slate-200/70">
+                            <ArmazonThumbnail
+                              imagenUrl={item.imagenUrl}
+                              nombre={item.nombre}
+                              categoria={item.categoria}
+                              size={36}
+                              className="max-h-18"
+                            />
+                          </div>
+                          {item.certificaciones && item.certificaciones.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mb-1">
+                              {item.grupo && (
+                                <span className="text-[8.5px] font-bold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-800 dark:text-amber-300">
+                                  {item.grupo}
+                                </span>
+                              )}
+                              {item.certificaciones.map((c) => (
+                                <span
+                                  key={c}
+                                  className="text-[8.5px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                                >
+                                  {c}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          <h5 className="font-extrabold text-slate-900 dark:text-white text-xs leading-tight">
+                            {item.nombre}
+                          </h5>
+                          <p className="text-[10px] text-slate-500 dark:text-zinc-400 mt-0.5 line-clamp-1">
+                            {item.marca ? `${item.marca} · ` : ''}{item.material}
+                          </p>
+                        </div>
+                        <div className="pt-2 mt-2 border-t border-slate-200/50 dark:border-white/5 font-mono font-black text-slate-900 dark:text-white text-xs">
+                          ${item.precioClp.toLocaleString('es-CL')} CLP
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 2. Configuración Óptica y Contexto de Uso del Cliente */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 space-y-3.5">
+                <div className="text-[10px] font-extrabold uppercase tracking-wider text-amaru-copper border-b border-slate-200/60 dark:border-white/5 pb-1.5">
+                  2. Especificaciones Ópticas y Contexto de Uso
+                </div>
+
+                {/* Material del Cristal */}
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-zinc-400 block mb-1.5">
+                    Material del Cristal
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(
+                      [
+                        { id: 'Orgánico / Plástico', extra: 'Incluido' },
+                        { id: 'Policarbonato', extra: '+$12.000' },
+                        { id: 'Mineral / Vidrio', extra: '+$15.000' },
+                      ] as const
+                    ).map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setMaterialCristal(m.id)}
+                        className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
+                          materialCristal === m.id
+                            ? 'bg-amber-500/15 border-amber-500 text-amber-900 dark:text-amber-200 font-bold'
+                            : 'bg-white dark:bg-[#1E1C1A] border-slate-200 dark:border-white/10 text-slate-600 dark:text-zinc-400'
+                        }`}
+                      >
+                        <span className="block text-[11px] leading-tight">{m.id}</span>
+                        <span className="text-[9px] font-mono opacity-80">{m.extra}</span>
+                      </button>
+                    ))}
                   </div>
                 </div>
 
-                {/* 2. Acetato Vintage Lumière */}
-                <div
-                  onClick={() => setArmazonSeleccionado('Acetato Vintage Lumière')}
-                  className={`p-3.5 rounded-2xl border cursor-pointer transition-all flex flex-col justify-between ${
-                    armazonSeleccionado === 'Acetato Vintage Lumière'
-                      ? 'bg-sky-500/10 border-sky-500 shadow-md ring-2 ring-sky-500/20'
-                      : 'bg-slate-50 dark:bg-black/20 border-slate-200 dark:border-white/10'
-                  }`}
-                >
-                  <div>
-                    <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-800 dark:text-sky-300">
-                      BLUE-BLOCK
-                    </span>
-                    <div className="h-16 flex items-center justify-center my-2 text-sky-600 dark:text-sky-400">
-                      <AcetatoLumiereIcon className="w-full h-full" />
-                    </div>
-                    <h5 className="font-extrabold text-slate-900 dark:text-white text-xs">
-                      Acetato Vintage Lumière
-                    </h5>
-                    <p className="text-[10px] text-slate-500 dark:text-zinc-400 mt-0.5">
-                      Boutique urbana con descanso visual digital.
-                    </p>
-                  </div>
-                  <div className="pt-2 mt-2 border-t border-slate-200/50 dark:border-white/5 font-mono font-black text-slate-900 dark:text-white">
-                    $72.000 CLP
+                {/* Tratamientos / Filtros */}
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-zinc-400 block mb-1.5">
+                    Tratamientos / Filtros Ópticos
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {[
+                      { id: 'Filtro UV', extra: 'Incluido' },
+                      { id: 'Filtro Luz Azul', extra: '+$10.000' },
+                      { id: 'Filtro Luz Amarilla (Conducción / Baja Luz)', extra: '+$12.000' },
+                    ].map((f) => {
+                      const activo = filtrosCristal.includes(f.id);
+                      return (
+                        <button
+                          key={f.id}
+                          type="button"
+                          onClick={() => toggleFiltro(f.id)}
+                          className={`p-2 rounded-xl border text-left transition-all cursor-pointer flex items-center justify-between gap-1 ${
+                            activo
+                              ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-900 dark:text-emerald-200 font-bold'
+                              : 'bg-white dark:bg-[#1E1C1A] border-slate-200 dark:border-white/10 text-slate-600 dark:text-zinc-400'
+                          }`}
+                        >
+                          <span className="text-[10.5px] leading-tight">{f.id}</span>
+                          <span className="text-[9px] font-mono shrink-0">{f.extra}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
-                {/* 3. Ultralight Flex-Steel */}
-                <div
-                  onClick={() => setArmazonSeleccionado('Ultralight Flex-Steel')}
-                  className={`p-3.5 rounded-2xl border cursor-pointer transition-all flex flex-col justify-between ${
-                    armazonSeleccionado === 'Ultralight Flex-Steel'
-                      ? 'bg-emerald-500/10 border-emerald-500 shadow-md ring-2 ring-emerald-500/20'
-                      : 'bg-slate-50 dark:bg-black/20 border-slate-200 dark:border-white/10'
-                  }`}
-                >
-                  <div>
-                    <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-800 dark:text-emerald-300">
-                      ULTRALIGHT 12g
-                    </span>
-                    <div className="h-16 flex items-center justify-center my-2 text-emerald-600 dark:text-emerald-400">
-                      <UltralightFlexIcon className="w-full h-full" />
-                    </div>
-                    <h5 className="font-extrabold text-slate-900 dark:text-white text-xs">
-                      Ultralight Flex-Steel
-                    </h5>
-                    <p className="text-[10px] text-slate-500 dark:text-zinc-400 mt-0.5">
-                      Acero quirúrgico flexible con memoria mecánica.
-                    </p>
+                {/* Adelgazamiento (Índice) */}
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-zinc-400 block mb-1.5">
+                    Adelgazamiento (Índice Refractivo)
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(
+                      [
+                        { id: 'Estándar (1.56)', extra: 'Base' },
+                        { id: 'Adelgazado (1.61)', extra: '+$18.000' },
+                        { id: 'Ultra Delgado (1.67)', extra: '+$32.000' },
+                      ] as const
+                    ).map((idx) => (
+                      <button
+                        key={idx.id}
+                        type="button"
+                        onClick={() => setAdelgazamiento(idx.id)}
+                        className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
+                          adelgazamiento === idx.id
+                            ? 'bg-sky-500/15 border-sky-500 text-sky-900 dark:text-sky-200 font-bold'
+                            : 'bg-white dark:bg-[#1E1C1A] border-slate-200 dark:border-white/10 text-slate-600 dark:text-zinc-400'
+                        }`}
+                      >
+                        <span className="block text-[11px] leading-tight">{idx.id}</span>
+                        <span className="text-[9px] font-mono opacity-80">{idx.extra}</span>
+                      </button>
+                    ))}
                   </div>
-                  <div className="pt-2 mt-2 border-t border-slate-200/50 dark:border-white/5 font-mono font-black text-slate-900 dark:text-white">
-                    $64.000 CLP
+                </div>
+
+                {/* Contexto de Uso y Especificaciones */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-zinc-400 block mb-1">
+                      Contexto Principal de Uso
+                    </label>
+                    <select
+                      value={contextoUso}
+                      onChange={(e) => setContextoUso(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[#1E1C1A] border border-slate-200 dark:border-white/10 text-xs font-semibold text-slate-800 dark:text-zinc-200 outline-none focus:ring-2 focus:ring-amaru-copper"
+                    >
+                      <option value="Faena minera">Faena minera / Operación en terreno</option>
+                      <option value="Turno nocturno">Turno nocturno / Baja luminosidad</option>
+                      <option value="Pantallas / Oficina">Pantallas / Computador / Oficina</option>
+                      <option value="Conducción">Conducción urbana y carretera</option>
+                      <option value="Lectura">Lectura y uso cotidiano</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-zinc-400 block mb-1">
+                      Especificaciones Adicionales del Cliente
+                    </label>
+                    <input
+                      type="text"
+                      value={especificacionesCliente}
+                      onChange={(e) => setEspecificacionesCliente(e.target.value)}
+                      placeholder="Ej: sensibilidad al brillo, ajuste de puente..."
+                      className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[#1E1C1A] border border-slate-200 dark:border-white/10 text-xs text-slate-800 dark:text-zinc-200 outline-none focus:ring-2 focus:ring-amaru-copper"
+                    />
                   </div>
                 </div>
               </div>
 
-              {/* Resumen de Modalidad de Pago y Filiación */}
-              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 space-y-3">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-200/60 dark:border-white/5">
-                  <span className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+              {/* 3. Desglose Financiero con Beneficio Previo de Convenio */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 space-y-2.5">
+                <div className="flex items-center justify-between text-xs text-slate-600 dark:text-zinc-300">
+                  <span>Subtotal (Armazón + Cristal + Tratamientos):</span>
+                  <span className="font-mono font-bold">${subtotalCotizacion.toLocaleString('es-CL')} CLP</span>
+                </div>
+
+                {tieneConvenioVigente && beneficioConvenio && (
+                  <div className="flex items-center justify-between text-xs p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-900 dark:text-emerald-200">
+                    <div>
+                      <span className="font-bold block">
+                        ✅ Beneficio Convenio {codigoConvenio.toUpperCase()} ({resultadoConvenio?.infoSindicato?.nombre})
+                      </span>
+                      <span className="text-[10px] opacity-85">{beneficioConvenio.detalleTexto}</span>
+                    </div>
+                    <span className="font-mono font-black text-emerald-700 dark:text-emerald-300 shrink-0">
+                      - ${descuentoOCobertura.toLocaleString('es-CL')} CLP
+                    </span>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-white/10">
+                  <span className="font-black text-slate-900 dark:text-white flex items-center gap-1.5 text-xs uppercase tracking-wider">
                     {tipoUsuario === 'Convenio Minero' ? (
                       <Receipt size={15} className="text-amaru-copper" />
                     ) : (
                       <CreditCard size={15} className="text-sky-500" />
                     )}
-                    Modalidad de Pago Asignada
+                    Total Final a Pagar
                   </span>
-                  <span className="font-mono font-black text-sm text-amaru-copper">
-                    ${getPrecioArmazon(armazonSeleccionado).toLocaleString('es-CL')} CLP
+                  <span className="font-mono font-black text-base text-amaru-copper">
+                    ${totalFinalAPagar.toLocaleString('es-CL')} CLP
                   </span>
-                </div>
-
-                <div className="text-[11px] text-slate-600 dark:text-zinc-400 space-y-1">
-                  {tipoUsuario === 'Convenio Minero' ? (
-                    <p>
-                      <strong>Descuento por Planilla en Convenio:</strong> 3 cuotas mensuales sin interés deducibles de tu liquidación de sueldo en <strong>{empresaFaena}</strong>. Cero desembolso hoy.
-                    </p>
-                  ) : (
-                    <p>
-                      <strong>Atención Particular / Webpay Plus:</strong> Pago en cuotas sin interés mediante tarjeta de débito/crédito en sucursal {ciudad} o vía link de pago Webpay.
-                    </p>
-                  )}
-                  <p className="text-slate-400 dark:text-zinc-500 pt-1">
-                    Titular: <strong>{nombreCompleto}</strong> (RUT: {rutFijo}) · Sucursal de Despacho: <strong>{ciudad}</strong>.
-                  </p>
                 </div>
               </div>
+
+              {/* 4. Método de Pago y Modalidad (100% / 50% Mitad / Cuotas) */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-zinc-400 block mb-1">
+                      Método de Pago *
+                    </label>
+                    <select
+                      value={metodoPago}
+                      onChange={(e) => setMetodoPago(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[#1E1C1A] border border-slate-200 dark:border-white/10 text-xs font-semibold text-slate-800 dark:text-zinc-200 outline-none focus:ring-2 focus:ring-amaru-copper"
+                    >
+                      <option value="Transferencia Bancaria">Transferencia Bancaria</option>
+                      <option value="Débito / Crédito">Débito / Crédito</option>
+                      <option value="Efectivo en Sucursal Calama">Efectivo en Sucursal Calama</option>
+                      <option value="Descuento por Planilla / Convenio">Descuento por Planilla / Convenio</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-zinc-400 block mb-1">
+                      Modalidad de Pago *
+                    </label>
+                    <select
+                      value={modalidadPagoDetalle}
+                      onChange={(e) =>
+                        setModalidadPagoDetalle(
+                          e.target.value as
+                            | 'Pago Total (100%)'
+                            | 'Pago a Mitad (50% Abono / 50% Saldo)'
+                            | 'Pago en Cuotas'
+                        )
+                      }
+                      className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[#1E1C1A] border border-slate-200 dark:border-white/10 text-xs font-semibold text-slate-800 dark:text-zinc-200 outline-none focus:ring-2 focus:ring-amaru-copper"
+                    >
+                      <option value="Pago Total (100%)">Pago Total (100%)</option>
+                      <option value="Pago a Mitad (50% Abono / 50% Saldo)">
+                        Pago a Mitad (50% Abono / 50% Saldo)
+                      </option>
+                      <option value="Pago en Cuotas">Pago en Cuotas</option>
+                    </select>
+                  </div>
+                </div>
+
+                {modalidadPagoDetalle === 'Pago a Mitad (50% Abono / 50% Saldo)' && (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 grid grid-cols-2 gap-3 text-xs animate-in fade-in">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase text-amber-800 dark:text-amber-300 block">
+                        Abono Inicial (50%)
+                      </span>
+                      <span className="font-mono font-black text-slate-900 dark:text-white text-sm">
+                        ${montoAbono50.toLocaleString('es-CL')} CLP
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold uppercase text-amber-800 dark:text-amber-300 block">
+                        Saldo al Retirar (50%)
+                      </span>
+                      <span className="font-mono font-black text-slate-900 dark:text-white text-sm">
+                        ${montoSaldo50.toLocaleString('es-CL')} CLP
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {modalidadPagoDetalle === 'Pago en Cuotas' && (
+                  <div className="p-3 rounded-xl bg-sky-500/10 border border-sky-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs animate-in fade-in">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-bold text-sky-900 dark:text-sky-200">Cuotas:</span>
+                      {([3, 6] as const).map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => setCuotasCantidad(c)}
+                          className={`px-3 py-1 rounded-lg font-bold text-xs cursor-pointer transition-all ${
+                            cuotasCantidad === c
+                              ? 'bg-sky-600 text-white shadow-xs'
+                              : 'bg-white dark:bg-[#1E1C1A] text-slate-600 dark:text-zinc-300 border border-slate-200 dark:border-white/10'
+                          }`}
+                        >
+                          {c} cuotas
+                        </button>
+                      ))}
+                    </div>
+                    <div className="font-mono font-black text-sky-900 dark:text-sky-200">
+                      {cuotasCantidad}x ${valorPorCuota.toLocaleString('es-CL')} CLP/mes
+                    </div>
+                  </div>
+                )}
+
+                <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                  Titular: <strong>{nombreCompleto}</strong> (RUT: {rutFijo}) · Retiro en <strong>Sucursal Calama</strong>.
+                </p>
+              </div>
+
+              {/* 5. Políticas de Garantía (Cristal, Marco Roto y Equivocación de Especificación) */}
+              <PoliticasGarantiaBox compact />
             </div>
           )}
         </div>

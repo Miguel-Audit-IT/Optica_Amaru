@@ -1,0 +1,62 @@
+[
+  {
+    "id": "seg-30-granate",
+    "modelo": "SEG 30 GRANATE",
+    "grupo": "Grupo I",
+    "color": "Transparente con rojo",
+    "lente": "Policarbonato blanco",
+    "proteccion": ["Puente anatómico de silicona", "Protección lateral"],
+    "certificaciones": ["CESMEC", "ISPCH"],
+    "imagen": "/images/catalogo/seg-30-granate.jpg"
+  },
+  {
+    "id": "seg-v7-negro",
+    "modelo": "SEG V7 NEGRO",
+    "grupo": "Grupo I",
+    "color": "Transparente con celeste/negro",
+    "lente": "Policarbonato blanco",
+    "proteccion": ["Protección lateral removible"],
+    "certificaciones": ["CESMEC", "ISPCH"],
+    "imagen": "/images/catalogo/seg-v7-negro.jpg"
+  },
+  {
+    "id": "seg-20-negro",
+    "modelo": "SEG 20 NEGRO",
+    "grupo": "Grupo II",
+    "color": "Transparente con negro",
+    "lente": "Policarbonato gris",
+    "proteccion": ["Protección lateral"],
+    "certificaciones": ["CESMEC"],
+    "imagen": "/images/catalogo/seg-20-negro.jpg"
+  },
+  {
+    "id": "seg-18-azul",
+    "modelo": "SEG 18 AZUL",
+    "grupo": "Grupo I",
+    "color": "Gris con celeste",
+    "lente": "Policarbonato blanco",
+    "proteccion": ["Brazo ajustable de largo y ángulo pantoscópico", "Goma protectora de golpes y polvo"],
+    "certificaciones": ["CESMEC", "ISPCH"],
+    "imagen": "/images/catalogo/seg-18-azul.jpg"
+  },
+  {
+    "id": "seg-17-azul",
+    "modelo": "SEG 17 AZUL",
+    "grupo": "Grupo I",
+    "color": "Transparente con celeste",
+    "lente": "Policarbonato",
+    "proteccion": ["Brazo ajustable de largo y ángulo pantoscópico"],
+    "certificaciones": ["CESMEC", "ISPCH"],
+    "imagen": "/images/catalogo/seg-17-azul.jpg"
+  },
+  {
+    "id": "seg-40-combor",
+    "modelo": "SEG 40 COMBOR",
+    "grupo": "Grupo II",
+    "color": "Negro",
+    "lente": "Policarbonato gris",
+    "proteccion": ["Brazo desmontable", "Cinta elástica ajustable", "Goma protectora de golpes y polvo", "Par de adaptadores de lentes"],
+    "certificaciones": ["CESMEC"],
+    "imagen": "/images/catalogo/seg-40-combor.jpg"
+  }
+]

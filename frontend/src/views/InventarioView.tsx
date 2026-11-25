@@ -16,28 +16,26 @@ import {
   Settings,
   MinusCircle,
   DollarSign,
+  Plus,
 } from 'lucide-react';
 import {
   getInventario,
   getSucursalActiva,
-  setSucursalActiva,
   registrarIngresoStock,
   descontarStock,
   guardarInventario,
+  agregarNuevoArmazon,
+  type CategoriaArmazon,
   type ItemInventario,
 } from '../services/inventarioService';
-import { getUserInfo, isUserAdmin, isUserAuditor } from '../utils/auth';
-import {
-  TitanioProIcon,
-  AcetatoLumiereIcon,
-  UltralightFlexIcon,
-} from '../components/icons/ArmazonesSVGs';
+import { getUserInfo, isUserAdmin } from '../utils/auth';
+import { ArmazonThumbnail } from '../components/ArmazonThumbnail';
 
 export const InventarioView: React.FC = () => {
   const navigate = useNavigate();
   const userInfo = getUserInfo();
   const isAdmin = isUserAdmin();
-  const isAuditor = isUserAuditor();
+  const isAuditor = false;
   const nombreOperador = (
     localStorage.getItem('amaru_nombre_vendedor') ||
     (userInfo.username === '17456789-2' ? 'JUANITA ARAYA' : 'CARLOS ROJAS MORALES')
@@ -119,12 +117,74 @@ export const InventarioView: React.FC = () => {
 
   // ── Estados para Recepción Controlada de Stock (Modal de Control Interno) ──
   const [modalIngresoAbierto, setModalIngresoAbierto] = useState(false);
-  const [skuIngreso, setSkuIngreso] = useState<string>('EPP-TITAN-001');
+  const [skuIngreso, setSkuIngreso] = useState<string>('SEG-30-GRANATE');
   const [sucursalIngreso, setSucursalIngreso] = useState<'Calama' | 'Antofagasta'>(sucursalActual);
   const [cantidadIngreso, setCantidadIngreso] = useState<number>(10);
   const [guiaDespacho, setGuiaDespacho] = useState<string>('');
   const [errorModal, setErrorModal] = useState<string>('');
   const [toastMensaje, setToastMensaje] = useState<string | null>(null);
+
+  // ── Estados para Modal Nuevo Armazón (Alta en Catálogo Real) ──
+  const [modalNuevoArmazonAbierto, setModalNuevoArmazonAbierto] = useState(false);
+  const [nuevoArmNombre, setNuevoArmNombre] = useState('');
+  const [nuevoArmMarca, setNuevoArmMarca] = useState('');
+  const [nuevoArmSku, setNuevoArmSku] = useState('');
+  const [nuevoArmCategoria, setNuevoArmCategoria] = useState<CategoriaArmazon>('Boutique & Urbano');
+  const [nuevoArmMaterial, setNuevoArmMaterial] = useState('Acetato Italiano / Aleación Ligera');
+  const [nuevoArmPrecio, setNuevoArmPrecio] = useState<number>(79000);
+  const [nuevoArmStock, setNuevoArmStock] = useState<number>(6);
+  const [nuevoArmImagenUrl, setNuevoArmImagenUrl] = useState<string>('');
+  const [errorNuevoArmazon, setErrorNuevoArmazon] = useState('');
+
+  const handleSubirImagenArmazon = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      setErrorNuevoArmazon('La imagen del armazón no puede superar los 2 MB.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setNuevoArmImagenUrl(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleCrearNuevoArmazon = (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorNuevoArmazon('');
+    const res = agregarNuevoArmazon(
+      {
+        sku: nuevoArmSku.trim() || undefined,
+        nombre: nuevoArmNombre,
+        marca: nuevoArmMarca,
+        categoria: nuevoArmCategoria,
+        material: nuevoArmMaterial,
+        precioClp: nuevoArmPrecio,
+        stockInicialCalama: nuevoArmStock,
+        imagenUrl: nuevoArmImagenUrl.trim() || undefined,
+      },
+      isAdmin ? 'María González (Administradora)' : `${nombreOperador} (VENDEDOR)`
+    );
+    if (!res.exito || !res.item) {
+      setErrorNuevoArmazon(res.error || 'No se pudo agregar el armazón.');
+      return;
+    }
+    setModalNuevoArmazonAbierto(false);
+    setNuevoArmNombre('');
+    setNuevoArmMarca('');
+    setNuevoArmSku('');
+    setNuevoArmImagenUrl('');
+    setNuevoArmPrecio(79000);
+    setNuevoArmStock(6);
+    refrescarInventario();
+    setToastMensaje(
+      `✓ Nuevo armazón "${res.item.nombre}" (${res.item.sku}) agregado al catálogo de Sucursal Calama con ${res.item.stock.Calama} unidades.`
+    );
+    setTimeout(() => setToastMensaje(null), 5000);
+  };
 
   // ── Estados para Modal Gerencial de Ajuste de Precio y Mermas (Exclusivo Administradora) ──
   const [modalGerencialAbierto, setModalGerencialAbierto] = useState(false);
@@ -162,11 +222,6 @@ export const InventarioView: React.FC = () => {
       window.removeEventListener('storage', handleStockUpdate);
     };
   }, []);
-
-  const handleCambiarSucursal = (sucursal: 'Calama' | 'Antofagasta') => {
-    setSucursalActiva(sucursal);
-    setSucursalActual(sucursal);
-  };
 
   const handleIniciarVenta = (item: ItemInventario) => {
     localStorage.setItem('amaru_armazon_precargado', JSON.stringify({
@@ -387,18 +442,6 @@ export const InventarioView: React.FC = () => {
   });
 
   const totalStockCalama = inventario.reduce((acc, i) => acc + (i.stock.Calama || 0), 0);
-  const totalStockAntofagasta = inventario.reduce((acc, i) => acc + (i.stock.Antofagasta || 0), 0);
-
-  const renderIconoArmazon = (nombre: string, size = 48) => {
-    const n = nombre.toLowerCase();
-    if (n.includes('lumière') || n.includes('acetato') || n.includes('vintage')) {
-      return <AcetatoLumiereIcon size={size} className="text-amaru-copper" />;
-    }
-    if (n.includes('flex') || n.includes('steel') || n.includes('minimal')) {
-      return <UltralightFlexIcon size={size} className="text-amaru-copper" />;
-    }
-    return <TitanioProIcon size={size} className="text-amaru-copper" />;
-  };
 
   const renderSemaforoStock = (cantidad: number, nombreSucursal: string, esPrincipal: boolean) => {
     if (cantidad >= 5) {
@@ -459,50 +502,44 @@ export const InventarioView: React.FC = () => {
             </p>
           </div>
 
-          {/* Switch de Sucursal Activa + Ingreso Stock + Refresh */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+          {/* Sede Activa Calama + Subir Nuevo Armazón + Ingreso Stock + Refresh */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2.5 flex-wrap">
             {!isAuditor && (
-              <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-white/90 dark:bg-black/40 border border-slate-200/90 dark:border-white/10 shadow-xs">
-                <button
-                  type="button"
-                  onClick={() => handleCambiarSucursal('Calama')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                    sucursalActual === 'Calama'
-                      ? 'bg-amaru-copper text-white shadow-xs'
-                      : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  <MapPin size={12} />
-                  <span>Calama ({totalStockCalama})</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleCambiarSucursal('Antofagasta')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                    sucursalActual === 'Antofagasta'
-                      ? 'bg-amaru-copper text-white shadow-xs'
-                      : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  <MapPin size={12} />
-                  <span>Antofagasta ({totalStockAntofagasta})</span>
-                </button>
+              <div className="inline-flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-white/90 dark:bg-black/40 border border-amber-500/30 text-xs font-bold text-amber-800 dark:text-amber-300 shadow-xs">
+                <MapPin size={13} className="text-amaru-copper" />
+                <span>Sucursal Calama ({totalStockCalama} uds)</span>
               </div>
             )}
 
-            {/* Botón Acción Secundaria: Registrar Ingreso de Stock (Oculto para Auditor SoD A.5.3) */}
+            {/* Botón Subir Nuevo Armazón al Catálogo */}
             {!isAuditor && (
               <button
                 type="button"
                 onClick={() => {
-                  setSucursalIngreso(sucursalActual);
+                  setErrorNuevoArmazon('');
+                  setModalNuevoArmazonAbierto(true);
+                }}
+                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-[#B85D19] hover:bg-[#8F3B09] active:scale-95 text-white flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-[#B85D19]/20 shrink-0"
+                title="Agregar un nuevo modelo de armazón al catálogo y cotizador"
+              >
+                <Plus size={14} />
+                <span>Nuevo Armazón</span>
+              </button>
+            )}
+
+            {/* Botón Acción Secundaria: Registrar Ingreso de Stock */}
+            {!isAuditor && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSucursalIngreso('Calama');
                   setErrorModal('');
                   setModalIngresoAbierto(true);
                 }}
                 className="px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white flex items-center gap-2 transition-all cursor-pointer shadow-md shadow-emerald-600/20 shrink-0"
                 title="Registrar ingreso de mercadería con Guía de Despacho o Factura Proveedor"
               >
-                <span>📦 Registrar Ingreso de Stock (Guía)</span>
+                <span>📦 Ingreso Stock (Guía)</span>
               </button>
             )}
 
@@ -710,9 +747,7 @@ export const InventarioView: React.FC = () => {
           {/* ── Grid de Tarjetas de Armazones ── */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {armazonesFiltrados.map((item) => {
-              const stockSucursalActiva = item.stock[sucursalActual] || 0;
-              const otraSucursal = sucursalActual === 'Calama' ? 'Antofagasta' : 'Calama';
-              const stockOtraSucursal = item.stock[otraSucursal] || 0;
+              const stockSucursalActiva = item.stock.Calama || 0;
 
               return (
                 <div
@@ -730,10 +765,35 @@ export const InventarioView: React.FC = () => {
                       </span>
                     </div>
 
-                    {/* Ilustración Vectorial del Armazón */}
-                    <div className="py-5 px-3 flex items-center justify-center bg-slate-50/60 dark:bg-black/20 rounded-2xl my-3 group-hover:scale-105 transition-transform duration-200">
-                      {renderIconoArmazon(item.nombre, 44)}
+                    {/* Imagen real del catálogo o fallback SVG */}
+                    <div className="p-2.5 flex items-center justify-center bg-white dark:bg-white/95 rounded-2xl my-3 border border-slate-200/70 group-hover:scale-[1.02] transition-transform duration-200 min-h-[120px]">
+                      <ArmazonThumbnail
+                        imagenUrl={item.imagenUrl}
+                        nombre={item.nombre}
+                        categoria={item.categoria}
+                        size={44}
+                        className="max-h-28"
+                      />
                     </div>
+
+                    {/* Badges de Grupo y Certificaciones (CESMEC / ISPCH) */}
+                    {(item.grupo || (item.certificaciones && item.certificaciones.length > 0)) && (
+                      <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                        {item.grupo && (
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/25">
+                            {item.grupo}
+                          </span>
+                        )}
+                        {item.certificaciones?.map((cert) => (
+                          <span
+                            key={cert}
+                            className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25"
+                          >
+                            ✓ {cert}
+                          </span>
+                        ))}
+                      </div>
+                    )}
 
                     {/* Nombre y Precio */}
                     <div className="space-y-1">
@@ -823,19 +883,13 @@ export const InventarioView: React.FC = () => {
 
                   {/* Pie de Tarjeta: Semáforos de Stock + Botón Iniciar Venta */}
                   <div className="mt-4 pt-4 border-t border-slate-100 dark:border-white/5 space-y-3">
-                    {/* Semáforos de ambas sucursales */}
+                    {/* Semáforo de Stock Sucursal Calama */}
                     <div className="flex flex-col gap-1.5">
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] font-bold text-slate-400 uppercase">
-                          Sucursal Activa ({sucursalActual}):
+                          Stock en Sucursal Calama:
                         </span>
-                        {renderSemaforoStock(stockSucursalActiva, sucursalActual, true)}
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-medium text-slate-400 uppercase">
-                          En {otraSucursal}:
-                        </span>
-                        {renderSemaforoStock(stockOtraSucursal, otraSucursal, false)}
+                        {renderSemaforoStock(stockSucursalActiva, 'Calama', true)}
                       </div>
                     </div>
 
@@ -1081,7 +1135,6 @@ export const InventarioView: React.FC = () => {
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/30 text-slate-900 dark:text-white text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-amaru-copper"
                   >
                     <option value="Calama">Sucursal Calama</option>
-                    <option value="Antofagasta">Sucursal Antofagasta</option>
                   </select>
                 </div>
 
@@ -1362,10 +1415,7 @@ export const InventarioView: React.FC = () => {
                       className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-black/30 text-slate-900 dark:text-white text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-amaru-copper"
                     >
                       <option value="Calama">
-                        Calama ({itemGerencial.stock.Calama || 0} disponibles)
-                      </option>
-                      <option value="Antofagasta">
-                        Antofagasta ({itemGerencial.stock.Antofagasta || 0} disponibles)
+                        Sucursal Calama ({itemGerencial.stock.Calama || 0} disponibles)
                       </option>
                     </select>
                   </div>
@@ -1442,6 +1492,190 @@ export const InventarioView: React.FC = () => {
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal Subir / Agregar Nuevo Armazón al Catálogo Real ── */}
+      {modalNuevoArmazonAbierto && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/65 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#1C1A18] border border-amber-500/30 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150 max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-white/5">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 rounded-xl bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30">
+                  <Plus size={18} />
+                </span>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white">
+                    Subir Nuevo Armazón al Catálogo
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                    Quedará disponible de inmediato en el cotizador de pacientes y mesón Calama.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalNuevoArmazonAbierto(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-white p-1 rounded-lg cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {errorNuevoArmazon && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs font-semibold flex items-center gap-2">
+                <AlertCircle size={15} className="shrink-0" />
+                <span>{errorNuevoArmazon}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleCrearNuevoArmazon} className="space-y-3.5 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold uppercase text-[10px] tracking-wider text-slate-600 dark:text-zinc-400 mb-1">
+                    Modelo / Nombre *
+                  </label>
+                  <input
+                    type="text"
+                    value={nuevoArmNombre}
+                    onChange={(e) => setNuevoArmNombre(e.target.value)}
+                    placeholder="Ej: Ray-Ban Wayfarer Pro"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amaru-copper"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold uppercase text-[10px] tracking-wider text-slate-600 dark:text-zinc-400 mb-1">
+                    Marca *
+                  </label>
+                  <input
+                    type="text"
+                    value={nuevoArmMarca}
+                    onChange={(e) => setNuevoArmMarca(e.target.value)}
+                    placeholder="Ej: Oakley / Ray-Ban / Amaru"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amaru-copper"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold uppercase text-[10px] tracking-wider text-slate-600 dark:text-zinc-400 mb-1">
+                    Categoría *
+                  </label>
+                  <select
+                    value={nuevoArmCategoria}
+                    onChange={(e) => setNuevoArmCategoria(e.target.value as CategoriaArmazon)}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white font-semibold outline-none focus:ring-2 focus:ring-amaru-copper"
+                  >
+                    <option value="Boutique & Urbano">Boutique &amp; Urbano</option>
+                    <option value="Seguridad Óptica (EPP)">Seguridad Óptica (EPP)</option>
+                    <option value="Ultralivianos & Titanio">Ultralivianos &amp; Titanio</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-bold uppercase text-[10px] tracking-wider text-slate-600 dark:text-zinc-400 mb-1">
+                    SKU (Opcional · Auto)
+                  </label>
+                  <input
+                    type="text"
+                    value={nuevoArmSku}
+                    onChange={(e) => setNuevoArmSku(e.target.value.toUpperCase())}
+                    placeholder="Ej: BOUT-RAY-007"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 font-mono uppercase text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amaru-copper"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold uppercase text-[10px] tracking-wider text-slate-600 dark:text-zinc-400 mb-1">
+                  Material de la Montura *
+                </label>
+                <input
+                  type="text"
+                  value={nuevoArmMaterial}
+                  onChange={(e) => setNuevoArmMaterial(e.target.value)}
+                  placeholder="Ej: Acetato Italiano / Titanio / TR90"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amaru-copper"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold uppercase text-[10px] tracking-wider text-slate-600 dark:text-zinc-400 mb-1">
+                    Precio Venta (CLP) *
+                  </label>
+                  <input
+                    type="number"
+                    min={10000}
+                    step={1000}
+                    value={nuevoArmPrecio}
+                    onChange={(e) => setNuevoArmPrecio(Number(e.target.value))}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 font-mono font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amaru-copper"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold uppercase text-[10px] tracking-wider text-slate-600 dark:text-zinc-400 mb-1">
+                    Stock Inicial (Sucursal Calama) *
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={nuevoArmStock}
+                    onChange={(e) => setNuevoArmStock(Number(e.target.value))}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 font-mono font-bold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amaru-copper"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Ruta/URL o Subida de Imagen del Armazón */}
+              <div className="space-y-1.5">
+                <label className="block font-bold uppercase text-[10px] tracking-wider text-slate-600 dark:text-zinc-400">
+                  Imagen del Armazón (Ruta /catalogo/... o Subir Archivo)
+                </label>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="text"
+                    value={nuevoArmImagenUrl}
+                    onChange={(e) => setNuevoArmImagenUrl(e.target.value)}
+                    placeholder="Ej: /images/catalogo/nuevo-armazon.jpg o https://..."
+                    className="flex-1 px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white text-xs outline-none focus:ring-2 focus:ring-amaru-copper"
+                  />
+                  <label className="px-3 py-2 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300 font-bold text-[11px] cursor-pointer text-center shrink-0 hover:bg-amber-500/20 transition-colors">
+                    Subir Foto
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleSubirImagenArmazon}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2.5 border-t border-slate-100 dark:border-white/5">
+                <button
+                  type="button"
+                  onClick={() => setModalNuevoArmazonAbierto(false)}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-white/10 text-slate-600 dark:text-zinc-400 font-semibold cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="btn-copper px-5 py-2.5 rounded-xl font-bold uppercase tracking-wider cursor-pointer shadow-md flex items-center gap-1.5"
+                >
+                  <CheckCircle2 size={15} />
+                  <span>Guardar en Catálogo</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

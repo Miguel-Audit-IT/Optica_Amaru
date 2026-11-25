@@ -25,8 +25,12 @@ export interface InfoSindicato {
   porcentajeDescuento?: number; // Porcentaje para Tipo A (ej: 20 para 20%)
   empresa: string;
   descripcion: string;
+  fechaVigencia?: string; // YYYY-MM-DD
+  estado?: 'Vigente' | 'Vencido';
   contactoWhatsAppDirectiva?: string;
 }
+
+export const STORAGE_KEY_CATALOGO_CONVENIOS = 'amaru_catalogo_convenios';
 
 export const CATALOGO_CODIGOS_SINDICALES: Record<string, InfoSindicato> = {
   // ── TIPO B: Planilla / Subvención Corporativa ─────────────────────────────────
@@ -38,6 +42,8 @@ export const CATALOGO_CODIGOS_SINDICALES: Record<string, InfoSindicato> = {
     tope: 150000,
     empresa: 'Codelco Chuquicamata',
     descripcion: 'Cobertura hasta $150.000 CLP vía descuento por planilla minera.',
+    fechaVigencia: '2026-12-31',
+    estado: 'Vigente',
     contactoWhatsAppDirectiva: '+56985860973',
   },
   SDM0826: {
@@ -48,6 +54,8 @@ export const CATALOGO_CODIGOS_SINDICALES: Record<string, InfoSindicato> = {
     tope: 140000,
     empresa: 'Codelco Ministro Hales',
     descripcion: 'Cobertura hasta $140.000 CLP vía descuento por planilla minera.',
+    fechaVigencia: '2026-12-31',
+    estado: 'Vigente',
     contactoWhatsAppDirectiva: '+56985860973',
   },
   SDE1126: {
@@ -58,6 +66,8 @@ export const CATALOGO_CODIGOS_SINDICALES: Record<string, InfoSindicato> = {
     tope: 180000,
     empresa: 'Minera Escondida / BHP',
     descripcion: 'Cobertura hasta $180.000 CLP vía descuento por planilla faena Coloso/Mina.',
+    fechaVigencia: '2026-12-31',
+    estado: 'Vigente',
     contactoWhatsAppDirectiva: '+56985860973',
   },
   'GOB-LOA26': {
@@ -68,6 +78,8 @@ export const CATALOGO_CODIGOS_SINDICALES: Record<string, InfoSindicato> = {
     tope: 120000,
     empresa: 'Gobernación Provincial El Loa / Servicios Públicos',
     descripcion: 'Cobertura hasta $120.000 CLP con cargo al fondo de bienestar público.',
+    fechaVigencia: '2026-12-31',
+    estado: 'Vigente',
     contactoWhatsAppDirectiva: '+56985860973',
   },
 
@@ -80,17 +92,134 @@ export const CATALOGO_CODIGOS_SINDICALES: Record<string, InfoSindicato> = {
     porcentajeDescuento: 20,
     empresa: 'Colegios y Docentes Provincia El Loa',
     descripcion: '20% de Descuento Directo en armazones y cristales al pagar con tarjeta o efectivo.',
+    fechaVigencia: '2026-12-31',
+    estado: 'Vigente',
   },
   'JJVV-NORTE': {
     codigo: 'JJVV-NORTE',
-    nombre: 'Convenio Juntas de Vecinos Calama & Antofagasta',
+    nombre: 'Convenio Juntas de Vecinos Calama',
     tipo: 'TIPO_A',
     tipoNombre: 'Descuento Directo al Contado',
     porcentajeDescuento: 15,
     empresa: 'Unión Comunal de Juntas de Vecinos',
     descripcion: '15% de Descuento Directo para vecinos acreditados al pagar con tarjeta o efectivo.',
+    fechaVigencia: '2026-12-31',
+    estado: 'Vigente',
   },
 };
+
+export function getCatalogoConvenios(): InfoSindicato[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_CATALOGO_CONVENIOS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed as InfoSindicato[];
+      }
+    }
+  } catch {
+    // fallback
+  }
+  const inicial = Object.values(CATALOGO_CODIGOS_SINDICALES);
+  try {
+    localStorage.setItem(STORAGE_KEY_CATALOGO_CONVENIOS, JSON.stringify(inicial));
+  } catch {
+    // ignore
+  }
+  return inicial;
+}
+
+export function guardarCatalogoConvenios(lista: InfoSindicato[]): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_CATALOGO_CONVENIOS, JSON.stringify(lista));
+    window.dispatchEvent(new Event('amaru_convenios_updated'));
+  } catch {
+    // ignore
+  }
+}
+
+export function getMapaConvenios(): Record<string, InfoSindicato> {
+  const lista = getCatalogoConvenios();
+  const mapa: Record<string, InfoSindicato> = {};
+  for (const item of lista) {
+    mapa[item.codigo.trim().toUpperCase()] = item;
+  }
+  return mapa;
+}
+
+export function estaConvenioVigente(info: InfoSindicato): boolean {
+  if (info.estado === 'Vencido') return false;
+  if (info.fechaVigencia) {
+    const limite = new Date(`${info.fechaVigencia}T23:59:59`);
+    if (!isNaN(limite.getTime()) && limite < new Date()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function crearConvenio(nuevo: InfoSindicato): {
+  exito: boolean;
+  error?: string;
+  convenio?: InfoSindicato;
+} {
+  const codigoLimpio = nuevo.codigo.trim().toUpperCase();
+  if (!codigoLimpio) {
+    return { exito: false, error: 'El código del convenio es obligatorio.' };
+  }
+  const lista = getCatalogoConvenios();
+  if (lista.some((c) => c.codigo.trim().toUpperCase() === codigoLimpio)) {
+    return { exito: false, error: `Ya existe un convenio registrado con el código "${codigoLimpio}".` };
+  }
+  const registro: InfoSindicato = {
+    ...nuevo,
+    codigo: codigoLimpio,
+    tipoNombre:
+      nuevo.tipo === 'TIPO_B'
+        ? 'Subvención / Descuento por Planilla'
+        : 'Descuento Directo al Contado',
+    estado: nuevo.estado || 'Vigente',
+    fechaVigencia: nuevo.fechaVigencia || '2026-12-31',
+  };
+  guardarCatalogoConvenios([registro, ...lista]);
+  return { exito: true, convenio: registro };
+}
+
+export function actualizarConvenio(
+  codigoOriginal: string,
+  cambios: Partial<InfoSindicato>
+): { exito: boolean; error?: string; convenio?: InfoSindicato } {
+  const target = codigoOriginal.trim().toUpperCase();
+  const lista = getCatalogoConvenios();
+  const idx = lista.findIndex((c) => c.codigo.trim().toUpperCase() === target);
+  if (idx === -1) {
+    return { exito: false, error: 'No se encontró el convenio a actualizar.' };
+  }
+  const actual = lista[idx];
+  const nuevoTipo = cambios.tipo || actual.tipo;
+  const actualizado: InfoSindicato = {
+    ...actual,
+    ...cambios,
+    codigo: actual.codigo,
+    tipo: nuevoTipo,
+    tipoNombre:
+      nuevoTipo === 'TIPO_B'
+        ? 'Subvención / Descuento por Planilla'
+        : 'Descuento Directo al Contado',
+  };
+  const nuevaLista = [...lista];
+  nuevaLista[idx] = actualizado;
+  guardarCatalogoConvenios(nuevaLista);
+  return { exito: true, convenio: actualizado };
+}
+
+export function eliminarConvenio(codigo: string): { exito: boolean } {
+  const target = codigo.trim().toUpperCase();
+  const lista = getCatalogoConvenios();
+  const filtrada = lista.filter((c) => c.codigo.trim().toUpperCase() !== target);
+  guardarCatalogoConvenios(filtrada);
+  return { exito: true };
+}
 
 export type EstadoBloqueoCodigo =
   | 'BLOQUEADO_30_DIAS'
@@ -191,12 +320,22 @@ export function validarCodigoSindicato(
     };
   }
 
-  const info = CATALOGO_CODIGOS_SINDICALES[cod];
+  const mapa = getMapaConvenios();
+  const info = mapa[cod];
   if (!info) {
     return {
       valido: false,
       bloqueado: false,
       mensajeError: `El código "${cod}" no corresponde a ningún convenio activo en el sistema.`,
+    };
+  }
+
+  if (!estaConvenioVigente(info)) {
+    return {
+      valido: false,
+      bloqueado: false,
+      infoSindicato: info,
+      mensajeError: `El convenio "${info.nombre}" (${cod}) se encuentra VENCIDO (vigencia hasta ${info.fechaVigencia || 'expirada'}).`,
     };
   }
 
@@ -268,7 +407,7 @@ export function calcularBeneficioConvenio(
   copagoExcedente: number;
   detalleTexto: string;
 } {
-  const info = CATALOGO_CODIGOS_SINDICALES[codigo.trim().toUpperCase()];
+  const info = getMapaConvenios()[codigo.trim().toUpperCase()];
   if (!info) {
     return {
       tipo: 'TIPO_A',

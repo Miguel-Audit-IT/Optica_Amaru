@@ -61,7 +61,7 @@ export function isUserStaffOrAdmin(): boolean {
     return true;
   }
   const rol = localStorage.getItem('amaru_rol')?.toUpperCase();
-  if (rol === 'ADMIN' || rol === 'GERENTE' || rol === 'AUDITOR') {
+  if (rol === 'ADMINISTRADOR' || rol === 'ADMIN' || rol === 'GERENTE') {
     return true;
   }
 
@@ -73,7 +73,7 @@ export function isUserStaffOrAdmin(): boolean {
       return true;
     }
     const tokenRol = payload?.rol?.toUpperCase();
-    if (tokenRol === 'ADMIN' || tokenRol === 'GERENTE' || tokenRol === 'AUDITOR') {
+    if (tokenRol === 'ADMINISTRADOR' || tokenRol === 'ADMIN' || tokenRol === 'GERENTE') {
       return true;
     }
   }
@@ -91,9 +91,12 @@ export function isUserOperator(): boolean {
   return rol === 'OPERADOR';
 }
 
+/**
+ * El rol Auditor fue consolidado en el rol Administrador.
+ * Se mantiene la firma para compatibilidad de compilación, retornando siempre false.
+ */
 export function isUserAuditor(): boolean {
-  const { rol } = getUserInfo();
-  return rol === 'AUDITOR';
+  return false;
 }
 
 export function getUserInfo(): { username: string; rut: string; is_staff: boolean; rol: string } {
@@ -112,8 +115,6 @@ export function getUserInfo(): { username: string; rut: string; is_staff: boolea
   let rol = 'PACIENTE';
   if (rawRol.includes('ADMIN')) {
     rol = 'ADMINISTRADOR';
-  } else if (rawRol.includes('AUDIT')) {
-    rol = 'AUDITOR';
   } else if (rawRol.includes('OPER')) {
     rol = 'OPERADOR';
   } else if (rawRol.includes('PACIENTE')) {

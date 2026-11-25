@@ -1555,36 +1555,14 @@ export const SeguimientoCompraView: React.FC = () => {
                     />
                   </div>
 
-                  {/* Ciudad de Atención / Despacho (SOLO Calama y Antofagasta) */}
+                  {/* Sede Operativa Activa: Sucursal Calama */}
                   <div>
                     <label className="text-[10px] font-bold uppercase tracking-wider text-slate-700 dark:text-zinc-300 block mb-1">
-                      Ciudad de Despacho * (Opciones Estrictas)
+                      Sucursal de Despacho *
                     </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setInputCiudadTemp('Calama')}
-                        className={`py-1.5 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                          inputCiudadTemp === 'Calama'
-                            ? 'bg-amaru-copper/15 border-amaru-copper text-amaru-copper shadow-xs'
-                            : 'bg-slate-50 dark:bg-black/30 border-slate-200 dark:border-white/10 text-slate-600 dark:text-zinc-400'
-                        }`}
-                      >
-                        <MapPin size={12} />
-                        <span>Calama</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setInputCiudadTemp('Antofagasta')}
-                        className={`py-1.5 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                          inputCiudadTemp === 'Antofagasta'
-                            ? 'bg-amaru-copper/15 border-amaru-copper text-amaru-copper shadow-xs'
-                            : 'bg-slate-50 dark:bg-black/30 border-slate-200 dark:border-white/10 text-slate-600 dark:text-zinc-400'
-                        }`}
-                      >
-                        <MapPin size={12} />
-                        <span>Antofagasta</span>
-                      </button>
+                    <div className="py-1.5 px-3 rounded-xl border bg-amaru-copper/15 border-amaru-copper text-amaru-copper text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs">
+                      <MapPin size={12} />
+                      <span>Sucursal Calama</span>
                     </div>
                   </div>
 
@@ -3040,7 +3018,6 @@ export const SeguimientoCompraView: React.FC = () => {
                     className="w-full p-2.5 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-xl text-xs font-medium"
                   >
                     <option value="Calama">📍 Sucursal Calama</option>
-                    <option value="Antofagasta">📍 Sucursal Antofagasta</option>
                   </select>
                 </div>
               </div>

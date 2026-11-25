@@ -65,6 +65,13 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
 
             const data = await response.json();
 
+            const rolRecibido = String(data.rol || '').toUpperCase();
+            if (rolRecibido.includes('AUDIT')) {
+                throw new Error(
+                    'El rol de Auditor independiente fue consolidado en el perfil de Administrador. Ingresa con credenciales de Administrador.'
+                );
+            }
+
             // Almacenamos tokens y timestamp de expiración (14 horas)
             const now = new Date().getTime();
             const expirationTime = now + 14 * 60 * 60 * 1000;
@@ -150,18 +157,14 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                         <div className="w-12 h-1 bg-[#B85D19] rounded-full mb-3 opacity-80" />
 
                         <p className="text-center text-xs sm:text-sm text-stone-700 dark:text-stone-300 font-medium px-2 leading-relaxed max-w-xs mb-4">
-                            Salud visual, boutique óptica y convenios corporativos en Calama y Antofagasta.
+                            Salud visual, boutique óptica y convenios corporativos en Sucursal Calama.
                         </p>
 
-                        {/* Píldoras de Sucursales en Vivo con pulsos verdes */}
+                        {/* Píldora de Sucursal Calama en Vivo */}
                         <div className="flex flex-wrap items-center justify-center gap-2">
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 border border-emerald-200/80 dark:border-emerald-800/60 shadow-2xs">
+                            <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 border border-emerald-200/80 dark:border-emerald-800/60 shadow-2xs">
                                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                                Calama · En Línea
-                            </span>
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 border border-emerald-200/80 dark:border-emerald-800/60 shadow-2xs">
-                                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                                Antofagasta · En Línea
+                                Sucursal Calama · En Línea
                             </span>
                         </div>
                     </div>
@@ -243,7 +246,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                         ) : (
                             <p className="flex items-center gap-1.5">
                                 <span className="w-1.5 h-1.5 rounded-full bg-[#B85D19]" />
-                                Acceso operativo para sucursales, laboratorio y auditoría.
+                                Acceso operativo para sucursales, laboratorio y administración.
                             </p>
                         )}
                     </div>
@@ -348,7 +351,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                                         Cotiza tu Receta o Agenda tu Hora
                                     </h4>
                                     <p className="text-xs text-stone-600 dark:text-stone-300 mt-1 leading-relaxed">
-                                        Ingresa directo a Sucursal Calama o Antofagasta para subir tu receta médica o agendar evaluación visual.
+                                        Ingresa directo a Sucursal Calama para subir tu receta médica o agendar evaluación visual.
                                     </p>
                                 </div>
                             </div>

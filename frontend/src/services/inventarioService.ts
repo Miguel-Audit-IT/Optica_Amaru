@@ -1,17 +1,33 @@
-// ── Servicio de Gestión de Inventario y Stock en Sucursales (Calama & Antofagasta) ──
+// ── Servicio de Gestión de Inventario y Stock en Sucursal Calama (Escalable Multi-Sucursal) ──
+import catalogoSeguridadJson from '../data/catalogoSeguridadCalama.json';
 
 export type CategoriaArmazon =
   | 'Boutique & Urbano'
   | 'Seguridad Óptica (EPP)'
   | 'Ultralivianos & Titanio';
 
+export interface CatalogoSeguridadRaw {
+  id: string;
+  modelo: string;
+  grupo: string;
+  color: string;
+  lente: string;
+  proteccion: string[];
+  certificaciones: string[];
+  imagen: string;
+}
+
 export interface ItemInventario {
   sku: string;
   nombre: string;
+  marca?: string;
+  grupo?: string;
   categoria: CategoriaArmazon;
   material: string;
   filtro: string;
+  proteccion?: string[];
   precioClp: number;
+  imagenUrl?: string;
   colores: string[];
   descripcion: string;
   stock: {
@@ -22,106 +38,42 @@ export interface ItemInventario {
   enStockMinimo?: number;
 }
 
-export const CATALOGO_INICIAL_ARMAZONES: ItemInventario[] = [
-  {
-    sku: 'EPP-TITAN-001',
-    nombre: 'Titanium Shield Pro',
-    categoria: 'Seguridad Óptica (EPP)',
-    material: 'Titanio Grado Aeroespacial + Insertos EPP',
-    filtro: 'Policarbonato High-Impact + UV400 Filtro Solar',
-    precioClp: 85000,
-    colores: ['Negro Mate Industrial', 'Cobre Amaru Cobrizo', 'Gris Grafito'],
-    descripcion: 'Montura de alta durabilidad certificada para trabajo en faena y uso diario de alto impacto.',
-    stock: {
-      Calama: 8,
-      Antofagasta: 3,
-    },
-    certificaciones: ['ANSI Z87.1', 'EN 166', 'DS 594'],
-    enStockMinimo: 2,
-  },
-  {
-    sku: 'BOUT-ACET-002',
-    nombre: 'Acetato Vintage Lumière',
-    categoria: 'Boutique & Urbano',
-    material: 'Acetato Italiano Orgánico Fresado a Mano',
-    filtro: 'Blue Block Digital + Antirreflejo Multicapa',
-    precioClp: 72000,
-    colores: ['Carey Habanero Clásico', 'Ámbar Translúcido', 'Negro Ónix Pulido'],
-    descripcion: 'Diseño retro contemporáneo con bisagras de 5 dientes y acabado boutique pulido con paño suave.',
-    stock: {
-      Calama: 12,
-      Antofagasta: 6,
-    },
-    certificaciones: ['Adaptación 100% MINSAL', 'Filtro UV400'],
-    enStockMinimo: 3,
-  },
-  {
-    sku: 'FLEX-STEEL-003',
-    nombre: 'Ultralight Flex-Steel',
-    categoria: 'Ultralivianos & Titanio',
-    material: 'Acero Quirúrgico con Memoria Térmica (6.8g)',
-    filtro: 'Tratamiento Oleofóbico + Hidrofóbico Antirrayas',
-    precioClp: 64000,
-    colores: ['Plata Satinada', 'Azul Cobalto Profundo', 'Bronce Calama'],
-    descripcion: 'Estructura ultraliviana hipoalergénica con puente elástico ergonómico y plaquetas de silicona médica.',
-    stock: {
-      Calama: 6,
-      Antofagasta: 2,
-    },
-    certificaciones: ['ISO 12870 Óptico', 'Hipoalergénico'],
-    enStockMinimo: 2,
-  },
-  {
-    sku: 'BOUT-METRO-004',
-    nombre: 'Metropolitan Classic Rimless',
-    categoria: 'Boutique & Urbano',
-    material: 'Monel Reforzado con Varillas Esculpidas',
-    filtro: 'Blue Block HD + Protección Luz Azul 420nm',
-    precioClp: 89000,
-    colores: ['Dorado Champagne', 'Titanio Pulido Espejo'],
-    descripcion: 'Silueta minimalista al aire para máxima elegancia ejecutiva y confort en jornadas prolongadas.',
-    stock: {
-      Calama: 5,
-      Antofagasta: 4,
-    },
-    certificaciones: ['Norma Oftálmica ISO 8980'],
-    enStockMinimo: 2,
-  },
-  {
-    sku: 'EPP-VULC-005',
-    nombre: 'Vulcan Impact Protect Z87',
-    categoria: 'Seguridad Óptica (EPP)',
-    material: 'TR90 Memoria Polimérica con Sellos Laterales Removibles',
-    filtro: 'Cristales Antiempañante Permanente + Polarizado',
-    precioClp: 78000,
-    colores: ['Negro Asfalto', 'Naranja Faena de Alta Visibilidad'],
-    descripcion: 'Protección perimetral total contra partículas suspendidas, radiación UV extrema y polvo en suspensión.',
-    stock: {
-      Calama: 14,
-      Antofagasta: 9,
-    },
-    certificaciones: ['ANSI Z87.1+', 'ISP Chile Registro EPP'],
-    enStockMinimo: 4,
-  },
-  {
-    sku: 'FLEX-AERO-006',
-    nombre: 'AeroLight Titanium Minimal',
-    categoria: 'Ultralivianos & Titanio',
-    material: 'Beta-Titanio 0.6mm sin Tornillos',
-    filtro: 'Fotocromático Transitions Gen 8 (Claro a Oscuro)',
-    precioClp: 96000,
-    colores: ['Gunmetal Espacial', 'Oro Rosa Satín'],
-    descripcion: 'Tecnología sin tornillos ni soldaduras: resistencia inigualable con un peso pluma casi imperceptible.',
-    stock: {
-      Calama: 4,
-      Antofagasta: 1,
-    },
-    certificaciones: ['CE Medical Device Clase I'],
-    enStockMinimo: 2,
-  },
-];
+const PRECIOS_CATALOGO_OFICIAL: Record<string, { precio: number; stockCalama: number }> = {
+  'seg-30-granate': { precio: 74000, stockCalama: 14 },
+  'seg-v7-negro': { precio: 76000, stockCalama: 11 },
+  'seg-20-negro': { precio: 69000, stockCalama: 9 },
+  'seg-18-azul': { precio: 82000, stockCalama: 12 },
+  'seg-17-azul': { precio: 72000, stockCalama: 10 },
+  'seg-40-combor': { precio: 88000, stockCalama: 8 },
+};
 
-export const STORAGE_KEY_INVENTARIO = 'amaru_inventario_stock';
+export const CATALOGO_INICIAL_ARMAZONES: ItemInventario[] = (
+  catalogoSeguridadJson as CatalogoSeguridadRaw[]
+).map((raw) => {
+  const meta = PRECIOS_CATALOGO_OFICIAL[raw.id] || { precio: 75000, stockCalama: 10 };
+  return {
+    sku: raw.id.toUpperCase(),
+    nombre: raw.modelo,
+    marca: `Seguridad Óptica · ${raw.grupo}`,
+    grupo: raw.grupo,
+    categoria: 'Seguridad Óptica (EPP)',
+    material: raw.proteccion.join(' · '),
+    filtro: raw.lente,
+    proteccion: raw.proteccion,
+    precioClp: meta.precio,
+    imagenUrl: raw.imagen,
+    colores: [raw.color],
+    descripcion: `${raw.modelo} (${raw.grupo}) — Lente ${raw.lente}. ${raw.proteccion.join(', ')}.`,
+    stock: {
+      Calama: meta.stockCalama,
+      Antofagasta: 0,
+    },
+    certificaciones: raw.certificaciones,
+    enStockMinimo: 2,
+  };
+});
+
+export const STORAGE_KEY_INVENTARIO = 'amaru_inventario_stock_calama_v2';
 export const STORAGE_KEY_SUCURSAL = 'amaru_sucursal_activa';
 export const STORAGE_KEY_MOVIMIENTOS = 'amaru_movimientos_stock';
 
@@ -190,16 +142,92 @@ export function registrarIngresoStock(
 }
 
 export function getSucursalActiva(): 'Calama' | 'Antofagasta' {
-  const guardada = localStorage.getItem(STORAGE_KEY_SUCURSAL);
-  if (guardada === 'Antofagasta' || guardada === 'Calama') {
-    return guardada;
-  }
+  // Alcance operativo actual centrado exclusivamente en Sucursal Calama
   return 'Calama';
 }
 
-export function setSucursalActiva(sucursal: 'Calama' | 'Antofagasta') {
-  localStorage.setItem(STORAGE_KEY_SUCURSAL, sucursal);
+export function setSucursalActiva(_sucursal: 'Calama' | 'Antofagasta') {
+  localStorage.setItem(STORAGE_KEY_SUCURSAL, 'Calama');
   window.dispatchEvent(new Event('amaru_sucursal_updated'));
+}
+
+export interface NuevoArmazonInput {
+  sku?: string;
+  nombre: string;
+  marca: string;
+  categoria: CategoriaArmazon;
+  material: string;
+  filtro?: string;
+  precioClp: number;
+  stockInicialCalama: number;
+  imagenUrl?: string;
+  descripcion?: string;
+  colores?: string[];
+}
+
+export function agregarNuevoArmazon(
+  input: NuevoArmazonInput,
+  registradoPor = 'María González (Administradora)'
+): { exito: boolean; error?: string; item?: ItemInventario } {
+  const nombreLimpio = input.nombre.trim();
+  const marcaLimpia = input.marca.trim();
+  if (!nombreLimpio) {
+    return { exito: false, error: 'El nombre o modelo del armazón es obligatorio.' };
+  }
+  if (!input.precioClp || input.precioClp <= 0) {
+    return { exito: false, error: 'El precio debe ser mayor a $0 CLP.' };
+  }
+  const catalogo = getInventario();
+  const skuFinal = (
+    input.sku?.trim().toUpperCase() ||
+    `AMARU-${nombreLimpio.replace(/[^a-zA-Z0-9]/g, '').slice(0, 5).toUpperCase()}-${String(catalogo.length + 1).padStart(3, '0')}`
+  );
+  if (catalogo.some((i) => i.sku.toUpperCase() === skuFinal)) {
+    return { exito: false, error: `Ya existe un armazón registrado con el SKU "${skuFinal}".` };
+  }
+
+  const nuevoItem: ItemInventario = {
+    sku: skuFinal,
+    nombre: nombreLimpio,
+    marca: marcaLimpia || 'Óptica Amaru',
+    categoria: input.categoria,
+    material: input.material.trim() || 'Acetato / Aleación Óptica',
+    filtro: input.filtro?.trim() || 'Compatible con UV, Luz Azul y Adelgazado',
+    precioClp: Math.round(input.precioClp),
+    imagenUrl: input.imagenUrl?.trim() || undefined,
+    colores: input.colores && input.colores.length > 0 ? input.colores : ['Negro Mate', 'Carey Clásico'],
+    descripcion:
+      input.descripcion?.trim() ||
+      `Montura ${marcaLimpia || 'Óptica Amaru'} disponible en Sucursal Calama.`,
+    stock: {
+      Calama: Math.max(0, Math.round(input.stockInicialCalama)),
+      Antofagasta: 0,
+    },
+    certificaciones: ['Garantía Óptica Amaru Calama'],
+    enStockMinimo: 2,
+  };
+
+  guardarInventario([nuevoItem, ...catalogo]);
+
+  try {
+    const movimientos = getMovimientosStock();
+    movimientos.unshift({
+      id: `ALTA-${Date.now()}`,
+      sku: nuevoItem.sku,
+      nombreArmazon: nuevoItem.nombre,
+      sucursal: 'Calama',
+      cantidad: nuevoItem.stock.Calama,
+      guiaDespachoFactura: `ALTA-CAT-${skuFinal.slice(0, 8)}`,
+      registradoPor,
+      fecha: new Date().toLocaleString('es-CL'),
+    });
+    localStorage.setItem(STORAGE_KEY_MOVIMIENTOS, JSON.stringify(movimientos));
+    window.dispatchEvent(new Event('amaru_movimientos_stock_updated'));
+  } catch {
+    // ignore
+  }
+
+  return { exito: true, item: nuevoItem };
 }
 
 export function getInventario(): ItemInventario[] {

@@ -31,7 +31,7 @@ import {
 import {
   validarCodigoSindicato,
   type ResultadoValidacionCodigo,
-  CATALOGO_CODIGOS_SINDICALES,
+  getMapaConvenios,
 } from '../services/convenioSindicatoService';
 import {
   validarPrestador,
@@ -39,6 +39,9 @@ import {
   type ResultadoValidacionPrestador,
 } from '../services/rnpiService';
 import { WhatsAppIcon } from '../components/icons/WhatsAppIcon';
+import { getInventario, type ItemInventario } from '../services/inventarioService';
+import { PoliticasGarantiaBox } from '../components/PoliticasGarantiaBox';
+import { ArmazonThumbnail } from '../components/ArmazonThumbnail';
 
 type TipoSolicitud = 'Cotizar Receta Médica' | 'Agendar Examen Visual' | 'Consulta Convenio';
 
@@ -51,8 +54,9 @@ export const PublicQRView: React.FC = () => {
   // ── Estados de Navegación por Pasos ─────────────────────────────────────────
   const [paso, setPaso] = useState<1 | 2 | 3>(1);
 
-  // ── Paso 1: Sucursal, Tipo y Datos del Paciente / Cliente ───────────────────
-  const [sucursal, setSucursal] = useState<CiudadAtencion>('Calama');
+  // ── Paso 1: Sucursal Calama, Tipo y Datos del Paciente / Cliente ───────────
+  const [sucursal] = useState<CiudadAtencion>('Calama');
+  const [catalogoArmazones] = useState<ItemInventario[]>(() => getInventario());
   const [tipoSolicitud, setTipoSolicitud] = useState<TipoSolicitud>('Cotizar Receta Médica');
   const [rut, setRut] = useState('');
   const [errorRut, setErrorRut] = useState('');
@@ -65,6 +69,7 @@ export const PublicQRView: React.FC = () => {
   // ── Paso 2: Validación Clínica / Receta o Agenda ─────────────────────────────
   const [estadoReceta, setEstadoReceta] = useState<'vigente' | 'vencida'>('vigente');
   const [archivoReceta, setArchivoReceta] = useState<File | null>(null);
+  const [archivoPreviewUrl, setArchivoPreviewUrl] = useState<string | undefined>(undefined);
   const [armazonSeleccionado, setArmazonSeleccionado] = useState('Titanio Pro ANSI Z87.1');
 
   // ── Paso 3: Confirmación y Cuarentena Zero-Trust ────────────────────────────
@@ -260,6 +265,17 @@ export const PublicQRView: React.FC = () => {
     const file = e.target.files?.[0];
     if (file) {
       setArchivoReceta(file);
+      if (file.size <= 2 * 1024 * 1024 && (file.type.startsWith('image/') || file.type === 'application/pdf')) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          if (typeof reader.result === 'string') {
+            setArchivoPreviewUrl(reader.result);
+          }
+        };
+        reader.readAsDataURL(file);
+      } else {
+        setArchivoPreviewUrl(undefined);
+      }
       const resHash = verificarHashReceta(file, formatearRUT(rut));
       setHashArchivoGenerado(resHash.hash);
       setAlertaHashReceta(resHash.mensaje || null);
@@ -349,7 +365,7 @@ export const PublicQRView: React.FC = () => {
     }
 
     const codigoNormalizado = esConvenioEmpresa ? codigoConvenio.trim().toUpperCase() : '';
-    const infoConv = codigoNormalizado ? CATALOGO_CODIGOS_SINDICALES[codigoNormalizado] : undefined;
+    const infoConv = codigoNormalizado ? getMapaConvenios()[codigoNormalizado] : undefined;
     const esTipoB = infoConv?.tipo === 'TIPO_B';
 
     const nueva = agregarSolicitudReceta({
@@ -362,6 +378,8 @@ export const PublicQRView: React.FC = () => {
       empresa: infoConv?.empresa || (esConvenioEmpresa ? empresaSindicato : undefined),
       tipoReceta: estadoReceta === 'vigente' ? 'vigente' : 'sin_receta',
       archivoNombre: archivoReceta ? archivoReceta.name : 'Receta_Digital.pdf',
+      archivoPesoKb: archivoReceta ? Math.max(1, Math.round(archivoReceta.size / 1024)) : undefined,
+      archivoPreviewUrl,
       dioptriasManuales: true,
       odEsfera,
       odCilindro,
@@ -483,7 +501,7 @@ export const PublicQRView: React.FC = () => {
                 </span>
               </div>
               <p className="text-[11px] font-medium text-stone-500 dark:text-stone-400 mt-0.5">
-                Óptica Amaru · Tu Visión, Tu Imagen · Calama & Antofagasta
+                Óptica Amaru · Tu Visión, Tu Imagen · Sucursal Calama
               </p>
             </div>
           </div>
@@ -570,27 +588,19 @@ export const PublicQRView: React.FC = () => {
                 </p>
               </div>
 
-              {/* Selector de Sucursal */}
+              {/* Sede Operativa Exclusiva: Sucursal Calama */}
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 dark:text-stone-300 mb-1.5">
                   Sucursal de Atención <span className="text-[#B85D19]">*</span>
                 </label>
-                <div className="grid grid-cols-2 gap-2.5">
-                  {(['Calama', 'Antofagasta'] as CiudadAtencion[]).map((ciudad) => (
-                    <button
-                      key={ciudad}
-                      type="button"
-                      onClick={() => setSucursal(ciudad)}
-                      className={`p-3 rounded-2xl border text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                        sucursal === ciudad
-                          ? 'border-[#B85D19] bg-[#B85D19]/10 text-[#B85D19] ring-2 ring-[#B85D19]/25 shadow-xs'
-                          : 'border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-[#1A1816] text-stone-700 dark:text-stone-300 hover:border-stone-300'
-                      }`}
-                    >
-                      <MapPin size={14} className={sucursal === ciudad ? 'text-[#B85D19]' : 'text-stone-400'} />
-                      <span>Sucursal {ciudad}</span>
-                    </button>
-                  ))}
+                <div className="p-3 rounded-2xl border border-[#B85D19] bg-[#B85D19]/10 text-[#B85D19] text-xs font-bold flex items-center justify-between gap-2 shadow-xs">
+                  <span className="flex items-center gap-2">
+                    <MapPin size={14} className="text-[#B85D19]" />
+                    <span>Sucursal Calama (Sede Operativa Activa)</span>
+                  </span>
+                  <span className="text-[10px] font-mono bg-white/80 dark:bg-black/30 px-2 py-0.5 rounded-full">
+                    En Línea
+                  </span>
                 </div>
               </div>
 
@@ -1032,7 +1042,7 @@ export const PublicQRView: React.FC = () => {
                       {/* Botones de Selección Rápida de Médicos Semilla */}
                       <div className="mt-2 space-y-1">
                         <span className="text-[10px] text-stone-400 font-medium block">
-                          Médicos Acreditados Calama / Antofagasta (Click para probar):
+                          Médicos Acreditados Sucursal Calama (Click para probar):
                         </span>
                         <div className="flex flex-wrap gap-1.5">
                           {PADRON_RNPI_INICIAL.map((doc) => (
@@ -1210,28 +1220,44 @@ export const PublicQRView: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Selector de Armazón de Interés */}
+                  {/* Selector de Armazón del Catálogo Real (Stock Calama) */}
                   <div>
                     <label className="block text-xs font-bold uppercase tracking-wider text-stone-700 dark:text-stone-300 mb-1.5">
-                      Línea de Armazón de Interés
+                      Línea de Armazón en Stock (Sucursal Calama)
                     </label>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      {[
-                        { sku: 'Titanio Pro ANSI Z87.1', desc: 'Boutique & Minero' },
-                        { sku: 'Lumière Progresivo Acetato', desc: 'Boutique Alta Gama' },
-                        { sku: 'Ultralight Flex TR90', desc: 'Liviano y Flexible' },
-                      ].map((item) => (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {catalogoArmazones.map((item) => (
                         <div
                           key={item.sku}
-                          onClick={() => setArmazonSeleccionado(item.sku)}
-                          className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all text-center ${
-                            armazonSeleccionado === item.sku
+                          onClick={() => setArmazonSeleccionado(item.nombre)}
+                          className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all text-left ${
+                            armazonSeleccionado === item.nombre
                               ? 'border-[#B85D19] bg-[#B85D19]/10 ring-2 ring-[#B85D19]/20 font-bold text-[#B85D19]'
                               : 'border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-[#1A1816] text-stone-700 dark:text-stone-300 hover:border-stone-300'
                           }`}
                         >
-                          <span className="font-extrabold block text-xs">{item.sku}</span>
-                          <span className="text-[10px] text-stone-400 block mt-0.5">{item.desc}</span>
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="font-mono text-[10px] text-stone-400">{item.sku}</span>
+                            <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                              {item.stock.Calama} disp.
+                            </span>
+                          </div>
+                          <div className="h-20 flex items-center justify-center my-1.5 bg-white rounded-xl p-1 border border-stone-200/70">
+                            <ArmazonThumbnail
+                              imagenUrl={item.imagenUrl}
+                              nombre={item.nombre}
+                              categoria={item.categoria}
+                              size={32}
+                              className="max-h-18"
+                            />
+                          </div>
+                          <span className="font-extrabold block text-xs mt-0.5">{item.nombre}</span>
+                          <span className="text-[10px] text-stone-500 dark:text-stone-400 block">
+                            {item.grupo ? `${item.grupo} · ` : ''}{item.certificaciones?.join(' · ') || item.filtro}
+                          </span>
+                          <span className="font-mono text-[11px] font-bold text-stone-900 dark:text-white block mt-0.5">
+                            ${item.precioClp.toLocaleString('es-CL')} CLP
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -1469,6 +1495,9 @@ export const PublicQRView: React.FC = () => {
                   </span>
                 </div>
               </div>
+
+              {/* Políticas de Garantía Óptica Amaru */}
+              <PoliticasGarantiaBox compact />
 
               {/* Aviso de Garantía Anti-Sabotaje */}
               <div className="p-3.5 rounded-2xl bg-sky-500/10 border border-sky-500/30 text-sky-900 dark:text-sky-200 text-xs text-left flex items-start gap-2.5 font-medium leading-relaxed">
